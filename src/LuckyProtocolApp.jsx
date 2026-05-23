@@ -4533,51 +4533,16 @@ export default function LuckyProtocolApp() {
     sessionPassword, walletMeta, setToast,
   };
 
- // Only block the main UI when a wallet ALREADY EXISTS and is in a
- // mid-onboarding state (locked / needs Alchemy / needs risk ack).
- // Pre-wallet users land on the casino lobby itself — they can
- // browse the rooms and stats without being interrogated at the
- // door. The OnboardModal moves inside the WALLET tab (see the
- // main-app branch below) where it's the user's deliberate choice
- // to set up a wallet.
- //
- // needAlchemy / needRiskAck still fire here once walletMeta exists
- // because their gate is "must be set up before any signing op", and
- // the moment a wallet exists the next signing op is one click away.
-  const inBootModal =
-    walletMeta?.address &&
-    (!sessionPassword || needAlchemy || needRiskAck);
+ // Only the returning-user unlock case stays fullscreen. Onboard /
+ // Alchemy / RiskAck all render inline inside the WALLET tab now.
+  const inBootModal = walletMeta?.address && !sessionPassword;
 
   if (inBootModal) {
     return (
       <div className="hxm-app">
         <CasinoCss />
         <BtxSharedCss />
-        {/* AlchemySetupModal — REQUIRED in the web build. Without an
-            Alchemy key the indexer's cold scan dogpiles public
-            mempool.space / blockstream.info mirrors and 429s within
-            minutes. Blocks the UI until the user pastes a valid
-            HTTPS URL. Only fires here AFTER a wallet exists; pre-
-            wallet users browse the lobby without this gate. */}
-        {needAlchemy && (
-          <AlchemySetupModal
-            onDone={() => {
-              setNeedAlchemy(false);
-              setToast({ kind: "ok", msg: "Network configured — welcome to LUCKYPROTOCOL" });
-            }}
-          />
-        )}
-        {!needAlchemy && needRiskAck && (
-          <RiskAckModal
-            onAck={() => {
-              try { lsSetJSON(LS_KEYS.riskAck, { at: Date.now() }); } catch {}
-              setNeedRiskAck(false);
-            }}
-          />
-        )}
-        {!needAlchemy && !needRiskAck && walletMeta?.address && !sessionPassword && (
-          <UnlockModal onUnlocked={(pw) => setSessionPassword(pw)} />
-        )}
+        <UnlockModal onUnlocked={(pw) => setSessionPassword(pw)} />
       </div>
     );
   }
@@ -4636,7 +4601,6 @@ export default function LuckyProtocolApp() {
         setScreen={setScreen}
         onOpenDonate={() => setShowDonate(true)}
         locked={!walletMeta?.address || !hasAlchemyKey()}
-        setToast={setToast}
       />
       {showDonate && (
         <DonateModal onClose={() => setShowDonate(false)} setToast={setToast} />
@@ -4746,6 +4710,7 @@ export default function LuckyProtocolApp() {
                 setWalletMeta={setWalletMeta}
                 setFirstRun={setFirstRun}
                 setNeedRiskAck={setNeedRiskAck}
+                setNeedAlchemy={setNeedAlchemy}
                 setToast={setToast}
                 goDashboard={goDashboard}
                 sessionPassword={sessionPassword}
@@ -4791,13 +4756,12 @@ export default function LuckyProtocolApp() {
                 }}
               />
             )}
+            {/* WALLET tab. firstRun → OnboardModal (inline, casino bg).
+                Otherwise: needRiskAck → RiskAckModal (inline now that
+                the long red warning is removed), else → WalletScreen. */}
             {screen === "wallet" && firstRun && (
               <OnboardModal
                 onClose={() => {
-                  // User backed out of wallet setup — drop them on the
-                  // lobby (no wallet committed). Nothing has been written
-                  // to IDB yet at this point (the commit only fires from
-                  // step 4 submitPassword), so this is a true cancel.
                   setScreen("dashboard");
                   setActiveNav("dashboard");
                 }}
@@ -4807,19 +4771,30 @@ export default function LuckyProtocolApp() {
                     if (cache) setWalletMeta(cache);
                   });
                   if (pw) setSessionPassword(pw);
-                  // Re-evaluate Alchemy gate after onboarding finishes — a
-                  // freshly-onboarded user typically has no key, so the
-                  // AlchemySetupModal opens right after the wallet lands.
                   setNeedAlchemy(!hasAlchemyKey());
-                  // Re-arm the risk acknowledgment. The initial useState
-                  // ran when no wallet existed, so it captured `false`
-                  // and stuck. After onboarding a wallet now exists, but
-                  // the React state hasn't re-read LS — flip it here.
                   setNeedRiskAck(!lsGetJSON(LS_KEYS.riskAck));
                 }}
               />
             )}
-            {screen === "wallet" && !firstRun && (
+            {screen === "wallet" && !firstRun && needAlchemy && (
+              <AlchemySetupModal
+                onDone={() => {
+                  setNeedAlchemy(false);
+                  setToast({ kind: "ok", msg: "Network configured — welcome to LUCKYPROTOCOL" });
+                }}
+                onCancel={() => setNeedAlchemy(false)}
+              />
+            )}
+            {screen === "wallet" && !firstRun && !needAlchemy && needRiskAck && (
+              <RiskAckModal
+                onAck={() => {
+                  try { lsSetJSON(LS_KEYS.riskAck, { at: Date.now() }); } catch {}
+                  setNeedRiskAck(false);
+                }}
+                onCancel={() => setNeedRiskAck(false)}
+              />
+            )}
+            {screen === "wallet" && !firstRun && !needAlchemy && !needRiskAck && (
               <WalletScreen
                 state={state}
                 walletMeta={walletMeta}
@@ -4926,48 +4901,26 @@ export default function LuckyProtocolApp() {
           visitor sees the casino lobby on landing and onboarding
           happens only after they deliberately click WALLET. */}
 
-      {/* AlchemySetupModal (post-unlock variant) — covers the case
-          where the user is past onboarding + unlock but hasn't yet
-          set an Alchemy key (e.g. they cleared it from SETTINGS, or
-          a returning user from before the gate was mandatory). */}
-      {!firstRun && needAlchemy && (
-        <AlchemySetupModal
-          onDone={() => {
-            setNeedAlchemy(false);
-            setToast({ kind: "ok", msg: "Network configured — welcome to LUCKYPROTOCOL" });
-          }}
-        />
-      )}
+      {/* Leftover AlchemySetupModal removed — duplicated the
+          inBootModal branch's instance and rendered unconditionally
+          across every screen, producing the same layout bug as the
+          stray RiskAckModal removed above. The inBootModal branch
+          covers both the fresh-onboarding case and the
+          "user cleared their key later" case via the same condition
+          (walletMeta && needAlchemy). */}
 
-      {/* Mandatory risk acknowledgment — blocks the UI on first run
-          until the user explicitly checks the "I understand the
-          risks" box. Sits between Alchemy setup and unlock so a fresh
-          user goes: Onboard → Alchemy → Risk Ack → Unlock → main app.
-          Returning users with `luckyprotocol.risk_ack.v1` set skip
-          straight to Unlock. */}
-      {!firstRun && !needAlchemy && needRiskAck && (
-        <RiskAckModal
-          onAck={() => {
-            try { lsSetJSON(LS_KEYS.riskAck, { at: Date.now() }); } catch {}
-            setNeedRiskAck(false);
-          }}
-        />
-      )}
+      {/* RiskAckModal moved inline into the WALLET tab (see the
+          {screen === "wallet" && needRiskAck && ...} render above).
+          The previous always-mounted instance here caused it to
+          render on EVERY screen (dashboard, ledger, etc.), which
+          looked like a layout bug — RiskAck floating over the
+          page content with the right sidebar pushed sideways. */}
 
-      {/* Boot-time unlock prompt. Mounts whenever:
-          - the onboarding flow is done (!firstRun)
-          - the Alchemy onboarding is done (!needAlchemy)
-          - a wallet exists on disk (walletMeta?.address)
-          - this session hasn't yet entered the password (!sessionPassword)
-          The modal blocks all interaction until the user enters the
-          right password. After unlock, sessionPassword lives in memory
-          for the rest of the process lifetime — no further prompts on
-          MINE / SEND / DEPLOY. App restart resurfaces the modal
-          (sessionPassword no longer persisted to localStorage, per
-          P0-1). */}
-      {!firstRun && !needAlchemy && !needRiskAck && walletMeta?.address && !sessionPassword && (
-        <UnlockModal onUnlocked={(pw) => setSessionPassword(pw)} />
-      )}
+      {/* UnlockModal is handled by the inBootModal branch above —
+          the leftover render that used to be here duplicated it and
+          rendered unconditionally across every screen, causing the
+          same layout bug as the stray RiskAckModal / AlchemySetupModal
+          removed in this same cleanup pass. */}
 
       {/* SettleModal moved up into .hxm-body so it can use absolute
           positioning anchored to the game-area column. */}
@@ -5574,6 +5527,110 @@ function CasinoCss() {
         display: block;
         color: var(--hxm-text-dim);
       }
+
+      /* Custom locked-nav tooltip (replaces the white browser title=
+         tooltip). Speech-bubble style with a left-pointing arrow at
+         the middle of the bubble's left side, so it visually connects
+         back to the right edge of the sidebar item. The bubble itself
+         picks up the same casino palette as everything else (gold
+         border on the dark-burgundy gradient background) so it reads
+         as part of the app, not as a generic system overlay.
+
+         Hooked off the data-tooltip attribute — only the locked nav
+         buttons have it, so the unlocked ones never spawn a bubble. */
+      .hxm-nav-btn[data-tooltip] {
+        position: relative;
+        overflow: visible;
+      }
+      .hxm-nav-btn[data-tooltip]::before,
+      .hxm-nav-btn[data-tooltip]::after {
+        pointer-events: none;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 160ms ease-out, visibility 160ms ease-out;
+        z-index: 2000;
+      }
+      .hxm-nav-btn[data-tooltip]::before {
+        /* Connecting arrow — matches the bubble's amber border so
+           the two read as one continuous shape. Triangle points LEFT
+           (vertex on left, base on right flush with the bubble) by
+           coloring border-right and leaving top/bottom transparent.
+           Sized down (6×7) to match the smaller bubble. */
+        content: "";
+        position: absolute;
+        left: calc(100% + 7px);
+        top: 50%;
+        transform: translateY(-50%);
+        width: 0;
+        height: 0;
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent;
+        border-right: 7px solid rgba(255, 180, 80, 0.6);
+        filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.7));
+      }
+      .hxm-nav-btn[data-tooltip]::after {
+        /* Bubble — 3D-raised version of the warn-Toast palette.
+           The toast itself has subtle depth from its gradient
+           (#2c1c08 -> #1a0e02), but on the sidebar where the bubble
+           sits against an equally-dark background, that subtle
+           depth disappears. We compensate with a stronger 3-stop
+           gradient + four shadow layers:
+             1. Top inset highlight at 35% alpha (warm cream) —
+                pronounced enough to "catch the light" against the
+                dark sidebar.
+             2. Bottom inset shadow at 60% alpha (pure black) —
+                defines the bottom edge with a hard line.
+             3. Close drop shadow (0/2/4) for tight definition.
+             4. Wide ambient drop shadow (0/16/40) for separation.
+           Gradient top stop (#4a3010) is noticeably brighter than
+           the toast's, again to compensate for the darker backdrop;
+           bottom stop matches the toast (#1a0e02).
+           text-transform: none + letter-spacing: normal cancel
+           the .hxm-nav-btn parent's uppercase + tracked styling. */
+        content: attr(data-tooltip);
+        position: absolute;
+        left: calc(100% + 14px);
+        top: 50%;
+        transform: translateY(-50%);
+        width: max-content;
+        max-width: 240px;
+        padding: 10px 18px;
+        background:
+          linear-gradient(180deg,
+            #4a3010 0%,
+            #2c1c08 50%,
+            #1a0e02 100%);
+        color: var(--hxm-gold-bright);
+        border: 1px solid rgba(255, 180, 80, 0.6);
+        border-radius: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        letter-spacing: normal;
+        text-transform: none;
+        white-space: normal;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 220, 137, 0.35),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+          0 2px 4px rgba(0, 0, 0, 0.5),
+          0 16px 40px rgba(0, 0, 0, 0.7);
+      }
+      /* Show on hover OR keyboard-focus so the bubble is reachable
+         without a pointing device. Disabled buttons receive focus in
+         modern browsers when tabIndex isn't explicitly removed, so
+         this works as accessibility affordance too. */
+      .hxm-nav-btn[data-tooltip]:hover::before,
+      .hxm-nav-btn[data-tooltip]:hover::after,
+      .hxm-nav-btn[data-tooltip]:focus-visible::before,
+      .hxm-nav-btn[data-tooltip]:focus-visible::after {
+        opacity: 1;
+        visibility: visible;
+      }
+      /* The sidebar uses overflow: hidden on its outer aside to keep
+         the gold star ornament clipped. Override only for the locked
+         nav buttons' pseudo-elements so the bubble can escape the
+         200px-wide sidebar column. */
+      .hxm-sidebar-left { overflow: visible; }
       .hxm-nav-btn:hover svg { color: var(--hxm-gold-bright); }
       .hxm-nav-btn:hover {
         color: var(--hxm-gold-bright);
@@ -7434,19 +7491,25 @@ function CasinoCss() {
 // `requiresUnlock: true` means "this section is gated until the user has
 // a wallet + Alchemy endpoint configured" — clicking it pre-onboarding
 // is a no-op with a tooltip explaining why. Always-available: DASHBOARD
-// (the lobby preview), WALLET (where you onboard), SETTINGS (where you
-// configure Alchemy / network). Everything else needs the wallet because
-// it either signs (DEPLOY, TRANSFERS, MINE), reads per-address state
-// (LEDGER, UTXO, ALMANAC), or queries the indexer past its lazy boot
-// (INDEX).
+// (the lobby preview) and WALLET (where you onboard). Everything else,
+// including SETTINGS, requires the wallet — pre-wallet there are no
+// per-user settings to configure (the Alchemy URL gets prompted by
+// AlchemySetupModal immediately after onboarding, not via Settings),
+// and exposing the Settings panel before any wallet exists invites
+// users to fiddle with knobs whose meaning hasn't been established yet.
 const NAV = [
   { key: "dashboard",    label: "DASHBOARD",   icon: LayoutDashboard, screen: "dashboard" },
+  // WALLET hoisted to slot #2 (right under DASHBOARD) because it is
+  // the user's ONLY pre-onboarding action — every other locked item
+  // is greyed out until a wallet exists, so the natural eye-track
+  // from the logo down the sidebar should land them on the wallet
+  // CTA next, not on a row of disabled options first.
+  { key: "wallet",       label: "WALLET",      icon: Wallet,          screen: "wallet" },
   { key: "mining",       label: "MINE",        icon: Layers,          screen: "iron",         requiresUnlock: true },
   { key: "transactions", label: "LEDGER",      icon: FileText,        screen: "transactions", requiresUnlock: true },
   { key: "almanac",      label: "ALMANAC",     icon: ScanSearch,      screen: "almanac",      requiresUnlock: true },
   { key: "index",        label: "INDEX",       icon: Database,        screen: "index",        requiresUnlock: true },
   { key: "deploy",       label: "DEPLOY",      icon: Rocket,          screen: "deploy",       requiresUnlock: true },
-  { key: "wallet",       label: "WALLET",      icon: Wallet,          screen: "wallet" },
   { key: "utxo",         label: "UTXO",        icon: Boxes,           screen: "utxo",         requiresUnlock: true },
   { key: "transfers",    label: "TRANSFERS",   icon: ArrowLeftRight,  screen: "transfers",    requiresUnlock: true },
  // BRIDGE — placeholder slot for the cross-chain bridge feature. Lands
@@ -7455,7 +7518,7 @@ const NAV = [
  // `.btx-modal-blocker::before` layer) so the empty state still feels
  // like part of the app, not a 404.
   { key: "bridge",       label: "BRIDGE",      icon: Cable,           screen: "bridge",       requiresUnlock: true },
-  { key: "settings",     label: "SETTINGS",    icon: Settings,        screen: "settings" },
+  { key: "settings",     label: "SETTINGS",    icon: Settings,        screen: "settings",     requiresUnlock: true },
 ];
 
 // Single source of truth for the "you need to onboard" message. Used by
@@ -7481,16 +7544,15 @@ function LocalTimeClock() {
   );
 }
 
-function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked, setToast }) {
+function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked }) {
   const click = (item) => {
-    // If this item requires the wallet+Alchemy gate and we're locked,
-    // do nothing visible beyond surfacing the standard hint as a toast.
-    // The button is also disabled visually (see below), so this is
-    // belt-and-braces in case a keyboard tab + Enter slips through.
-    if (locked && item.requiresUnlock) {
-      if (setToast) setToast({ kind: "warn", msg: LOCKED_HINT });
-      return;
-    }
+    // Locked items short-circuit silently. The hover-bubble tooltip
+    // already surfaces LOCKED_HINT to the user, so we don't ALSO pop
+    // a toast on click — that was redundant and noisy. Dashboard
+    // MINE buttons keep the click-toast affordance because they have
+    // no hover bubble of their own (centered on the page, not
+    // adjacent to a sidebar).
+    if (locked && item.requiresUnlock) return;
     setActiveNav(item.key);
     if (item.screen) setScreen(item.screen);
   };
@@ -7553,23 +7615,38 @@ function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked,
             key={item.key}
             className={`hxm-nav-btn ${active ? "is-active" : ""}`}
             onClick={() => click(item)}
-            // Native browser tooltip on hover. `title` is intentionally
-            // unsophisticated — it pops on any pointing device without
-            // needing JS layout math and respects accessibility
-            // (screen readers announce it). A styled tooltip popover
-            // could come later if we want richer copy or icons.
-            title={isLocked ? LOCKED_HINT : undefined}
-            disabled={isLocked}
-            // Faded look only on locked items. Click handler stays wired
-            // up (it surfaces the toast) but disabled=true + the dim
-            // opacity tell the user "you can hover but not enter".
-            style={isLocked
-              ? { opacity: 0.4, cursor: "not-allowed", filter: "grayscale(40%)" }
-              : undefined}
+            // `data-tooltip` is the hook for the CSS-driven speech-
+            // bubble defined in CasinoCss above (.hxm-nav-btn
+            // [data-tooltip]::before / ::after). Setting it to
+            // undefined removes the attribute entirely, so the CSS
+            // selector misses and unlocked items never spawn a
+            // bubble.
+            data-tooltip={isLocked ? LOCKED_HINT : undefined}
+            // `aria-disabled` instead of legacy `disabled` so screen
+            // readers announce the disabled state AND pointer /
+            // keyboard focus still hit the button (so :hover and
+            // :focus-visible fire and the tooltip shows).
             aria-disabled={isLocked || undefined}
+            // Cursor only on the button itself. Opacity + grayscale
+            // are applied to the inner span below, NOT the button —
+            // otherwise the ::after tooltip pseudo-element inherits
+            // the 40% opacity and the bubble looks see-through over
+            // the casino backdrop. Pseudo-elements share the parent's
+            // composite layer, so any parent opacity bleeds through.
+            style={isLocked ? { cursor: "not-allowed" } : undefined}
           >
-            <Icon size={14} />
-            {item.label}
+            <span style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+              width: "100%",
+              ...(isLocked
+                ? { opacity: 0.4, filter: "grayscale(40%)" }
+                : null),
+            }}>
+              <Icon size={14} />
+              {item.label}
+            </span>
           </button>
         );
       })}
@@ -8926,6 +9003,39 @@ function FooterBar({ state, settle, settling, reset }) {
       <span>On-Chain</span>
 
       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+        {/* Social link pair — GitHub for source verification (a wallet
+            user's first instinct should be "show me the code"), X for
+            release announcements. Inline SVG icons so we don't pull
+            new symbols out of lucide-react (its X-branding icon ships
+            as the old Twitter bird in the version we have pinned).
+            rel="noopener noreferrer" prevents window.opener leakage
+            and tab-napping from the destination. */}
+        <a
+          href="https://github.com/luckyprotocol"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hxm-btn"
+          aria-label="LUCKYPROTOCOL on GitHub"
+          title="Source on GitHub"
+          style={{ padding: "6px 8px", textDecoration: "none" }}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.66.5 12.04c0 5.1 3.29 9.42 7.86 10.95.58.11.79-.25.79-.56v-2.02c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11.06 11.06 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.15v3.18c0 .31.21.67.79.55C20.21 21.46 23.5 17.14 23.5 12.04 23.5 5.66 18.35.5 12 .5Z" />
+          </svg>
+        </a>
+        <a
+          href="https://x.com/luckyprotocolai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hxm-btn"
+          aria-label="LUCKYPROTOCOL on X"
+          title="LUCKYPROTOCOL on X"
+          style={{ padding: "6px 8px", textDecoration: "none" }}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </a>
         <SoundToggle />
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--hxm-green)", boxShadow: "0 0 6px var(--hxm-green)" }} />
@@ -10106,8 +10216,12 @@ function GameCard({ tier, state, onPlay, locked }) {
         <button
           className="hxm-btn-cta"
           onClick={onPlay}
-          disabled={locked}
-          title={locked ? LOCKED_HINT : undefined}
+          // `aria-disabled` instead of `disabled` so the click event
+          // still fires when locked — onPlay short-circuits via
+          // onLockedClick to pop the warn-toast. The native `disabled`
+          // attribute blocks clicks entirely, which is why the toast
+          // wasn't appearing.
+          aria-disabled={locked || undefined}
           style={{
             width: "100%", marginTop: 14,
             padding: "12px 16px",
@@ -13824,18 +13938,11 @@ function CoinShower() {
 // tier, regulatory unknown, no customer protection) — anything longer
 // becomes wallpaper.
 // =============================================================================
-function RiskAckModal({ onAck }) {
+function RiskAckModal({ onAck, onCancel }) {
   const [ackRisk, setAckRisk] = useState(false);
   const [ackLoss, setAckLoss] = useState(false);
   const [ackJurisdiction, setAckJurisdiction] = useState(false);
- // Fourth gate: explicit attestation that the user is NOT a resident of
- // or located in a jurisdiction where on-chain Bitcoin gambling is
- // categorically prohibited. Kept as a separate checkbox from the
- // generic "legal in my jurisdiction" row so the user has to look at
- // the named country list and consciously confirm they aren't on it —
- // a single "is legal" checkbox is too easy to skim past.
-  const [ackProhibited, setAckProhibited] = useState(false);
-  const ready = ackRisk && ackLoss && ackJurisdiction && ackProhibited;
+  const ready = ackRisk && ackLoss && ackJurisdiction;
   const Row = ({ checked, onToggle, label }) => (
     <label style={{
       display: "flex", alignItems: "flex-start", gap: 10,
@@ -13856,42 +13963,86 @@ function RiskAckModal({ onAck }) {
     </label>
   );
   return (
-    <div className="btx-modal-blocker">
-      <div className="btx-modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="hxm-bebas" style={{ fontSize: 11, color: "var(--hxm-red)", letterSpacing: "0.28em", marginBottom: 4 }}>
-          LUCKYPROTOCOL // RISK ACKNOWLEDGMENT
+    <div
+      style={{
+        // EXACTLY the same wrapper as OnboardModal (line ~14488).
+        // OnboardModal's screenshot shows correct layout (sidebar +
+        // topbar + right sidebar all in place); copying its wrapper
+        // verbatim should give RiskAck the same correct layout.
+        width: "100%",
+        minHeight: "calc(100vh - 110px)",
+        background:
+          "linear-gradient(rgba(5, 2, 3, 0.55), rgba(5, 2, 3, 0.55)), " +
+          `url(${BG_CASINO_INTERIOR_SRC}) center / cover no-repeat`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        className="btx-modal-card"
+        style={{
+          // Match OnboardModal card geometry too: 720 wide, 560 min
+          // height, 40x48 padding. Forces a fixed-shape card so the
+          // layout dimensions are identical to OnboardModal.
+          width: "100%",
+          maxWidth: 720,
+          minHeight: 560,
+          padding: "40px 48px",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* Header row — × close on the right (BACK was dropped because
+            it did the same thing as ×). × dismisses the modal via
+            onCancel and doesn't write the riskAck flag to LS, so the
+            modal re-prompts on next visit until the user actually
+            checks all boxes and clicks I UNDERSTAND — CONTINUE. Gold
+            tint matches the rest of the modal family. */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4, gap: 12 }}>
+          <div className="hxm-bebas" style={{ fontSize: 11, color: "var(--hxm-red)", letterSpacing: "0.28em" }}>
+            LUCKYPROTOCOL // RISK ACKNOWLEDGMENT
+          </div>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Close risk acknowledgment"
+              title="Close (re-prompts next visit)"
+              style={{
+                background: "transparent",
+                border: "1px solid rgba(212, 175, 55, 0.4)",
+                color: "var(--hxm-gold)",
+                borderRadius: 4,
+                width: 26,
+                height: 26,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 14,
+                lineHeight: 1,
+                cursor: "pointer",
+                padding: 0,
+                flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
+          )}
         </div>
         <h2 className="hxm-cinzel" style={{
           margin: "2px 0 0",
-          fontSize: 22, fontWeight: 900, letterSpacing: "0.06em",
+          fontSize: 24,
+          fontWeight: 900,
+          letterSpacing: "0.07em",
+          lineHeight: 1.15,
           color: "var(--hxm-red)",
           textShadow: "0 0 14px rgba(229,75,75,0.35)",
         }}>
           REAL MONEY · REAL LOSS
         </h2>
         <div className="btx-modal-divider" style={{ background: "linear-gradient(90deg, transparent 0%, var(--hxm-red) 50%, transparent 100%)" }} />
-
-        {/* Mainnet / unaudited operational warning — was previously in
-            OnboardModal Step 1 but moved here so the whole risk surface
-            sits in one place after the user has set up their wallet
-            and network. */}
-        <div className="btx-warn-box" style={{ marginBottom: 14 }}>
-          <div className="hxm-bebas" style={{ fontSize: 11, letterSpacing: "0.22em", marginBottom: 6, color: "var(--hxm-red)" }}>
-            ⚠ MAINNET · REAL BITCOIN · UNAUDITED
-          </div>
-          <div style={{ fontSize: 11, lineHeight: 1.6 }}>
-            LUCKYPROTOCOL defaults to <b>Bitcoin mainnet</b> — every MINE, SEND,
-            and DEPLOY costs <b>real BTC</b>. The protocol, wallet, indexer,
-            and UI have <b>NOT been audited</b> and may contain undiscovered
-            vulnerabilities. Bugs here can lose real money.
-          </div>
-          <ul style={{ margin: "8px 0 0 18px", padding: 0, fontSize: 11, lineHeight: 1.7 }}>
-            <li><b>Use SMALL amounts only.</b> Never load more than you can lose.</li>
-            <li>You are fully responsible for your own funds. No recovery, no support.</li>
-            <li>Always read the code before signing anything.</li>
-            <li>LUCKYPROTOCOL is mainnet-only — every action moves real BTC. Test with the smallest possible UTXO first.</li>
-          </ul>
-        </div>
 
         <div className="hxm-mono" style={{
           fontSize: 11, color: "var(--hxm-text-dim)",
@@ -13921,34 +14072,6 @@ function RiskAckModal({ onAck }) {
           checked={ackJurisdiction}
           onToggle={setAckJurisdiction}
           label={<>I have verified that on-chain Bitcoin gambling is <b>legal in my jurisdiction</b>. LUCKYPROTOCOL provides no customer protection, refunds, or dispute resolution.</>}
-        />
-        <Row
-          checked={ackProhibited}
-          onToggle={setAckProhibited}
-          label={
-            <>
-              <span>
-                I am <b>NOT</b> a resident of, or physically located in, a prohibited jurisdiction.
-              </span>
-              <span style={{ display: "block", marginTop: 4 }}>
-                LUCKYPROTOCOL MUST NOT be used by residents or persons located in:{" "}
-                <b>the United States of America</b> (including its territories),{" "}
-                <b>mainland China (PRC)</b>, <b>North Korea (DPRK)</b>,{" "}
-                <b>Iran</b>, <b>Syria</b>, <b>Cuba</b>,{" "}
-                <b>Russia</b>, <b>Belarus</b>,
-                the occupied regions of Ukraine (<b>Crimea, Donetsk, Luhansk, Zaporizhzhia, Kherson</b>),
-                or any other jurisdiction subject to{" "}
-                <b>OFAC / UN / EU comprehensive sanctions</b>, or any jurisdiction where
-                online gambling, unlicensed money-transmission, or unregistered token
-                issuance is prohibited.
-                I am also <b>at least 18 years of age</b> (or the legal age of majority in
-                my jurisdiction, whichever is higher), and I am not accessing LUCKYPROTOCOL
-                on behalf of, or for the benefit of, any person located in a prohibited
-                jurisdiction. I will <b>stop using LUCKYPROTOCOL immediately</b> if my
-                circumstances change.
-              </span>
-            </>
-          }
         />
 
         <div className="btx-modal-divider" />
@@ -14336,24 +14459,41 @@ function OnboardModal({ onDone, onClose }) {
 
   return (
     <div
+      style={{
+        // Backdrop layer: casino-interior photo fills the wallet-tab
+        // content area whenever the user has no wallet yet. This was
+        // the same image used in the old fullscreen .btx-modal-blocker
+        // — now we scope it to JUST the wallet tab so the lobby /
+        // dashboard / other screens stay clean, but stepping into
+        // WALLET while not onboarded shows the architectural
+        // chandelier-and-slot-rows scene under a small centered card.
+        // The dark overlay (rgba 0.55) keeps the gold modal text
+        // readable against the photo's bright highlights.
+        width: "100%",
+        minHeight: "calc(100vh - 110px)",
+        background:
+          "linear-gradient(rgba(5, 2, 3, 0.55), rgba(5, 2, 3, 0.55)), " +
+          `url(${BG_CASINO_INTERIOR_SRC}) center / cover no-repeat`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+    <div
       className="btx-modal-card"
       style={{
-        // Inline card. NOT a fullscreen modal — no .btx-modal-blocker
-        // wrapper, no fixed positioning, no dim/blur backdrop. The
-        // wallet tab is a deliberate destination; the user reaches it
-        // by clicking WALLET in the sidebar, and they can leave it the
-        // same way. Sidebar + topbar + dashboard behind this card
-        // stay fully interactive.
+        // Card sitting on the casino-interior backdrop. Landscape
+        // 720×560 — reverted from the 600 trim that the user found
+        // too cramped. minHeight pins the outer footprint constant
+        // across all four steps so they don't visibly shrink as the
+        // user advances 1 → 2 → 3 → 4.
         width: "100%",
         maxWidth: 720,
-        margin: "24px auto",
-        // Override the default centered-modal's 360° gold-glow shadow
-        // with a softer ambient drop-shadow appropriate for a page-
-        // resident card.
-        boxShadow:
-          "0 12px 60px rgba(0, 0, 0, 0.55), " +
-          "inset 0 0 0 1px rgba(212, 162, 58, 0.18)",
+        minHeight: 560,
         padding: "40px 48px",
+        display: "flex",
+        flexDirection: "column",
         animation: "btx-card-fade-in 240ms cubic-bezier(.16,.84,.36,1) both",
       }}
     >
@@ -14368,12 +14508,17 @@ function OnboardModal({ onDone, onClose }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div className="hxm-mono" style={{ fontSize: 11, color: "var(--hxm-gold)" }}>{stepLabel}</div>
+            {/* BACK button — only visible at step 2+ where it actually
+                navigates back one step (the prev-step button has a
+                real, non-close semantic distinct from ×). At step 1
+                it's redundant with × and was dropped. */}
             {step > 1 && (
               <button
                 type="button"
                 onClick={() => setStep(step - 1)}
                 className="btx-btn-back"
                 style={{ padding: "7px 16px", fontSize: 12 }}
+                title="Back to previous step"
               >
                 ← BACK
               </button>
@@ -14389,8 +14534,8 @@ function OnboardModal({ onDone, onClose }) {
                   border: "1px solid rgba(212, 175, 55, 0.4)",
                   color: "var(--hxm-gold)",
                   borderRadius: 4,
-                  width: 28,
-                  height: 28,
+                  width: 26,
+                  height: 26,
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -14405,33 +14550,149 @@ function OnboardModal({ onDone, onClose }) {
             )}
           </div>
         </div>
-        <h2 className="hxm-cinzel metal-gold" style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "0.06em" }}>
+        <h2 className="hxm-cinzel metal-gold" style={{
+          margin: 0,
+          fontSize: 24,
+          fontWeight: 900,
+          letterSpacing: "0.07em",
+          lineHeight: 1.15,
+        }}>
           {titleByStep[step]}
         </h2>
         <div className="btx-modal-divider" />
 
+        {/* Step-content wrapper. Card has a fixed 680px minHeight so
+            every step renders the same outer footprint; we take the
+            remaining vertical space (flex:1) and let the step content
+            flow inside. Short steps (verify, set-password) sit at the
+            top with empty room below — preferable to varying card
+            heights step-by-step which would feel jumpy as the user
+            walks through 1 → 2 → 3 → 4. */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+
         {step === 1 && (
           <>
-            <p style={{ fontSize: 12, lineHeight: 1.7, color: "var(--hxm-text)" }}>
-              LUCKYPROTOCOL generates your Bitcoin wallet entirely on this device using
-              the OS CSPRNG. The seed phrase and private key <b>never touch the network</b>.
+            {/* Hero paragraph. The "what is this" line — larger than the
+                body text, slightly muted color, comfortable line-length
+                (capped at 540px so it doesn't sprawl on 1440w monitors). */}
+            <p style={{
+              fontSize: 14.5,
+              lineHeight: 1.75,
+              color: "var(--hxm-text)",
+              margin: 0,
+              letterSpacing: "0.01em",
+            }}>
+              LUCKYPROTOCOL forges your Bitcoin wallet entirely on this device using the
+              operating system&apos;s CSPRNG. The seed phrase and private key{" "}
+              <b style={{ color: "var(--hxm-gold-bright)" }}>never touch the network</b>.
             </p>
-            <p style={{ fontSize: 12, lineHeight: 1.7, color: "var(--hxm-amber)" }}>
-              <b>Local generation only.</b> LUCKYPROTOCOL does not support importing an
-              existing seed phrase — pasting a mnemonic someone else gave you is a
-              well-known phishing pattern (they fund it, you fund it more, they sweep it).
-              The only safe path is the one this app produces below.
-            </p>
-            <ul style={{ margin: "0 0 18px 18px", padding: 0, fontSize: 12, color: "var(--hxm-text-dim)", lineHeight: 1.8 }}>
-              <li>Keys generated by OS CSPRNG</li>
-              <li>Encrypted with AES-256-GCM, key derived via Argon2id</li>
-              <li>All signing happens in the local backend, never in the UI</li>
-              <li>No cloud backup — write down your seed or lose your coins</li>
+
+            {/* Phishing warning callout. Amber-tinted box with a left-
+                rail accent stripe — turns the wall of text into a
+                "stop and read" UI element so users actually internalize
+                the don't-paste-someone-else's-seed rule. */}
+            <div style={{
+              marginTop: 22,
+              display: "flex",
+              gap: 14,
+              padding: "16px 18px 16px 16px",
+              border: "1px solid rgba(245, 220, 137, 0.32)",
+              borderLeft: "3px solid var(--hxm-amber)",
+              background: "linear-gradient(180deg, rgba(245, 220, 137, 0.06) 0%, rgba(212, 162, 58, 0.03) 100%)",
+              borderRadius: 3,
+            }}>
+              <div style={{
+                flexShrink: 0,
+                color: "var(--hxm-amber)",
+                fontSize: 18,
+                lineHeight: 1,
+                fontFamily: "'Bebas Neue', sans-serif",
+              }}>⚠</div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.7, color: "var(--hxm-text)" }}>
+                <div style={{
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  fontSize: 12,
+                  letterSpacing: "0.18em",
+                  color: "var(--hxm-amber)",
+                  marginBottom: 4,
+                  fontWeight: 700,
+                }}>LOCAL GENERATION ONLY</div>
+                LUCKYPROTOCOL does not import existing seed phrases. Pasting a mnemonic
+                someone else gave you is a well-known phishing pattern — they fund it,
+                you fund it more, they sweep it.
+              </div>
+            </div>
+
+            {/* Feature bullets — custom gold-diamond markers replace
+                the default disc bullets so the list reads as part of
+                the casino UI rather than a generic <ul>. */}
+            <ul style={{
+              marginTop: 26,
+              marginBottom: 0,
+              padding: 0,
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}>
+              {[
+                "Keys generated by the OS CSPRNG",
+                "Encrypted with AES-256-GCM, key derived via Argon2id",
+                "Signing happens locally — never in the UI layer",
+                "No cloud backup — write down your seed or lose your coins",
+              ].map((line) => (
+                <li key={line} style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  fontSize: 13,
+                  lineHeight: 1.65,
+                  color: "var(--hxm-text-dim)",
+                }}>
+                  <span style={{
+                    color: "var(--hxm-gold-bright)",
+                    fontSize: 9,
+                    marginTop: 6,
+                    flexShrink: 0,
+                  }}>◆</span>
+                  <span>{line}</span>
+                </li>
+              ))}
             </ul>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button className="btx-btn-primary" onClick={generate} disabled={busy}>
+
+            {/* CTA section — sits naturally below the bullets with
+                a comfortable gap. The card is short enough that we
+                don't need to push the button to the bottom; the
+                margin-top here is the breathing room. */}
+            <div style={{
+              marginTop: 26,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+            }}>
+              <button
+                className="btx-btn-primary"
+                onClick={generate}
+                disabled={busy}
+                style={{
+                  width: "100%",
+                  padding: "15px 28px",
+                  fontSize: 15,
+                  letterSpacing: "0.22em",
+                }}
+              >
                 {busy ? "GENERATING..." : "GENERATE NEW WALLET"}
               </button>
+              <p style={{
+                fontSize: 10.5,
+                color: "var(--hxm-text-mute)",
+                margin: 0,
+                letterSpacing: "0.08em",
+                fontFamily: "'JetBrains Mono', monospace",
+              }}>
+                ~1 second · runs entirely in this browser
+              </p>
             </div>
           </>
         )}
@@ -14462,7 +14723,18 @@ function OnboardModal({ onDone, onClose }) {
                 </div>
               ))}
             </div>
-            <button className="btx-btn-primary" onClick={goVerify}>I'VE WRITTEN IT DOWN</button>
+            <button
+              className="btx-btn-primary"
+              onClick={goVerify}
+              // marginTop: auto inside the flex-column step-content
+              // wrapper pushes the CTA to the bottom of the card so
+              // the empty area below the 12-word grid disappears.
+              // width 100% matches the visual weight of the other
+              // steps' full-width CTAs.
+              style={{ marginTop: "auto", width: "100%" }}
+            >
+              I&apos;VE WRITTEN IT DOWN
+            </button>
           </>
         )}
 
@@ -14495,7 +14767,13 @@ function OnboardModal({ onDone, onClose }) {
             }} className="hxm-mono">
               {verifyMsg}
             </div>
-            <button className="btx-btn-primary" onClick={submitVerify} style={{ width: "100%" }}>VERIFY</button>
+            <button
+              className="btx-btn-primary"
+              onClick={submitVerify}
+              style={{ width: "100%", marginTop: "auto" }}
+            >
+              VERIFY
+            </button>
           </>
         )}
 
@@ -14543,15 +14821,21 @@ function OnboardModal({ onDone, onClose }) {
             }}>
               {pwMsg}
             </div>
-            <button className="btx-btn-primary" onClick={submitPassword} disabled={busy}>
+            <button
+              className="btx-btn-primary"
+              onClick={submitPassword}
+              disabled={busy}
+              style={{ width: "100%", marginTop: "auto" }}
+            >
               {busy ? "ENCRYPTING..." : "ENCRYPT & SAVE"}
             </button>
           </>
         )}
 
-        {/* BACK button moved into the header row alongside the step
-            indicator (top-right). See the `step > 1 && <button>` inside
-            the modal header above. */}
+        </div>
+        {/* /step-content wrapper.  BACK button moved into the header
+            row alongside the step indicator (top-right). See the
+            `step > 1 && <button>` inside the modal header above. */}
 
       {/* Inner card-content wrapper was removed when the modal flattened
           into an inline card (no .btx-modal-blocker any more), so this
@@ -14681,6 +14965,7 @@ function OnboardModal({ onDone, onClose }) {
         }
         .btx-btn-danger:hover { color: #fff; background: linear-gradient(180deg, #a02323 0%, #5a0c0c 100%); }
       `), null)}</>
+    </div>
     </div>
   );
 }
@@ -16406,7 +16691,8 @@ function CoreRpcTestResult({ result, url }) {
 }
 
 function SettingsScreen({
-  walletMeta, setWalletMeta, setFirstRun, setNeedRiskAck, setToast, goDashboard,
+  walletMeta, setWalletMeta, setFirstRun, setNeedRiskAck, setNeedAlchemy,
+  setToast, goDashboard,
   sessionPassword, setSessionPassword, chainState, resetState,
 }) {
   const [endpoints, setEndpointsLocal] = useState(() => getEndpointsMock());
@@ -16687,10 +16973,37 @@ function SettingsScreen({
  // re-onboarding flow silently inherited the prior ack and the
  // RiskAckModal never re-appeared.
       LS_KEYS.riskAck,
+ // The Alchemy HTTPS URL is also tied to this wallet identity per
+ // user preference — wiping the wallet should re-prompt the user
+ // to register / paste their own Alchemy URL for the new wallet.
+ // Keep the LS keys in sync with chain.js's LS_ALCHEMY_KEY ("v2")
+ // + the legacy v1 key (older installs) so both get cleaned.
+      "luckyprotocol.alchemy_key.v2",
+      "luckyprotocol.alchemy_key.v1",
     ];
     for (const k of walletScopedKeys) {
       try { window.localStorage.removeItem(k); } catch (_) { /* ignore */ }
     }
+
+ // Removing the LS entry alone is NOT enough — the Alchemy key
+ // also lives in TWO in-memory caches that survive an LS wipe:
+ //   1. App-level `__alchemyKeyCache` (LuckyProtocolApp.jsx
+ //      module var, read by `hasAlchemyKey()` for the
+ //      AlchemySetupModal gate)
+ //   2. chain-web/esplora.js's `_alchemyKeyCache` (the hot-path
+ //      RPC client, decides whether outgoing fetches go to
+ //      Alchemy or fall through to public Esplora)
+ // settingsSetAlchemyKeyMock(null) is the single setter that
+ // pokes BOTH caches (via __setAlchemyKey →
+ // chainSetAlchemyKeySync → setEsploraAlchemyKey). Without this
+ // call, after wipe:
+ //   - `hasAlchemyKey()` still returns true → needAlchemy stays
+ //     false → AlchemySetupModal never re-fires
+ //   - the next chain RPC still routes through the wiped user's
+ //     Alchemy key, leaking the previous tenant's key to the
+ //     freshly onboarded one.
+    try { await settingsSetAlchemyKeyMock(null); }
+    catch (e) { console.warn("[wipe] clear alchemy in-memory cache failed", e); }
 
  // wipeIndexedBalances() wipes the two protocol/indexer.js-managed
  // keys (indexed_balances.v1 + indexed_transfers.v1). Centralized
@@ -16744,6 +17057,16 @@ function SettingsScreen({
  // keeps `needRiskAck=false` from before the wipe and the
  // re-onboarded user is never shown the 4-checkbox modal again.
     if (setNeedRiskAck) setNeedRiskAck(true);
+ // Symmetric re-arm for the Alchemy gate. `needAlchemy` is also a
+ // `useState(initial)` that only reads `hasAlchemyKey()` at App
+ // mount — even after this handler cleared the LS key AND wiped
+ // the in-memory cache via settingsSetAlchemyKeyMock(null), the
+ // React state stays at whatever it was at mount time (false, if
+ // the user had a key before wipe). Without this setter, the
+ // re-onboarded wallet skips AlchemySetupModal and goes straight
+ // to RiskAck → WalletScreen, leaving the user with no Alchemy
+ // URL bound to the new identity.
+    if (setNeedAlchemy) setNeedAlchemy(true);
     setToast({ kind: "warn", msg: "Wallet wiped — local state cleared" });
   };
 
@@ -16771,6 +17094,35 @@ function SettingsScreen({
       setAlchemyBusy(false);
     }
   };
+
+  // INLINE MODAL TAKEOVERS.
+  // When the user clicks VIEW RISK DISCLOSURE or WIPE WALLET we replace
+  // the entire Settings tab content with the corresponding modal (no
+  // fullscreen blocker — sidebars + topbar stay visible). The modals
+  // self-render the casino-interior backdrop + centered 720×560 card,
+  // matching the OnboardModal / AlchemySetupModal / RiskAckModal
+  // family. BACK / X / ESC dismiss flips the flag back to false and
+  // the panels return.
+  //
+  // SAFETY: must come AFTER every useState / useRef / useEffect above
+  // (Rules of Hooks — early returns can't preempt hook calls). Hook
+  // declarations end with the auto-persist endpoints useEffect that
+  // sits inside this component; everything below is wipe handlers and
+  // pure JSX, both safe to skip on the early-return paths.
+  if (wipeConfirm) {
+    return (
+      <WipeConfirmModal
+        onCancel={() => setWipeConfirm(false)}
+        onConfirm={async () => {
+          await wipe();
+          setWipeConfirm(false);
+        }}
+      />
+    );
+  }
+  if (riskOpen) {
+    return <RiskDisclosureModal onClose={() => setRiskOpen(false)} />;
+  }
 
   return (
     <div className="btx-screen">
@@ -17272,23 +17624,10 @@ function SettingsScreen({
         </button>
       </div>
 
-      {wipeConfirm && (
-        <WipeConfirmModal
-          onCancel={() => setWipeConfirm(false)}
-          onConfirm={async () => {
- // Drive the existing wipe pipeline (Tauri IPC + LS cleanup
- // + setFirstRun(true)). The modal unmounts itself the
- // moment `wipeConfirm` flips back to false — which `wipe`
- // doesn't currently do directly, so we close it here so
- // the user gets immediate dismissal even if the async
- // Tauri call takes a beat to return.
-            await wipe();
-            setWipeConfirm(false);
-          }}
-        />
-      )}
-
-      {riskOpen && <RiskDisclosureModal onClose={() => setRiskOpen(false)} />}
+      {/* WipeConfirmModal / RiskDisclosureModal are now rendered via
+          the early-return takeover at the top of this component (so
+          they replace the panel grid entirely rather than overlay
+          on top of it). No render branches needed here. */}
 
       <>{(__injectStyleOnce("__btx_style_7", `
         .btx-section-head {
@@ -17348,22 +17687,78 @@ function WipeConfirmModal({ onCancel, onConfirm }) {
   };
 
   return (
-    <div className="btx-modal-blocker" style={{ zIndex: 10000 }} onClick={onCancel}>
+    <div
+      style={{
+        // Inline casino-interior backdrop — matches OnboardModal /
+        // AlchemySetupModal / RiskAckModal so the wipe flow keeps the
+        // sidebars + topbar visible (no fullscreen blocker). Lives
+        // inside .hxm-center, which gives us the tab-area-only fill.
+        width: "100%",
+        minHeight: "calc(100vh - 110px)",
+        background:
+          "linear-gradient(rgba(5, 2, 3, 0.55), rgba(5, 2, 3, 0.55)), " +
+          `url(${BG_CASINO_INTERIOR_SRC}) center / cover no-repeat`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
       <div
         className="btx-modal-card"
- // Width inherits the global 480 default; the red border stays
- // (this is the destructive WipeConfirm — the colored frame
- // signals "danger zone").
-        style={{ borderColor: "var(--hxm-red)" }}
-        onClick={(e) => e.stopPropagation()}
+        style={{
+          // Same 720×560 geometry as the rest of the modal family for
+          // consistency. Red border keeps the "danger" colour signal
+          // intact.
+          width: "100%",
+          maxWidth: 720,
+          minHeight: 560,
+          padding: "40px 48px",
+          borderColor: "var(--hxm-red)",
+          display: "flex",
+          flexDirection: "column",
+        }}
       >
         <div className="btx-modal-corner btx-modal-corner-tl" style={{ borderColor: "var(--hxm-red)" }} />
         <div className="btx-modal-corner btx-modal-corner-tr" style={{ borderColor: "var(--hxm-red)" }} />
         <div className="btx-modal-corner btx-modal-corner-bl" style={{ borderColor: "var(--hxm-red)" }} />
         <div className="btx-modal-corner btx-modal-corner-br" style={{ borderColor: "var(--hxm-red)" }} />
 
-        <div className="hxm-bebas" style={{ fontSize: 11, color: "var(--hxm-red)", letterSpacing: "0.32em", marginBottom: 6 }}>
-          LUCKYPROTOCOL // DANGER ZONE
+        {/* Header row — × close on the right. BACK was dropped (it
+            duplicated × which already closes the modal). The bottom-
+            bar CANCEL still exists for the body-level confirm/cancel
+            pair. × uses the global gold tint to match the rest of
+            the modal family. */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6, gap: 12 }}>
+          <div className="hxm-bebas" style={{ fontSize: 11, color: "var(--hxm-red)", letterSpacing: "0.32em" }}>
+            LUCKYPROTOCOL // DANGER ZONE
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Close wipe-wallet confirmation"
+            title="Close (no wallet changes)"
+            disabled={busy}
+            style={{
+              background: "transparent",
+              border: "1px solid rgba(212, 175, 55, 0.4)",
+              color: "var(--hxm-gold)",
+              borderRadius: 4,
+              width: 26,
+              height: 26,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 14,
+              lineHeight: 1,
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.4 : 1,
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
         </div>
         <h2 className="hxm-cinzel" style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "0.06em", color: "var(--hxm-red)" }}>
           WIPE WALLET — IRREVERSIBLE
@@ -17458,23 +17853,105 @@ function WipeConfirmModal({ onCancel, onConfirm }) {
 }
 
 function RiskDisclosureModal({ onClose }) {
+ // ESC dismisses for keyboard users — same affordance as the rest
+ // of the modal family (OnboardModal / AlchemySetupModal /
+ // RiskAckModal / WipeConfirmModal).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
-    <div className="btx-modal-blocker" onClick={onClose}>
-      <div className="btx-modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="btx-modal-corner btx-modal-corner-tl" />
-        <div className="btx-modal-corner btx-modal-corner-tr" />
-        <div className="btx-modal-corner btx-modal-corner-bl" />
-        <div className="btx-modal-corner btx-modal-corner-br" />
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h2 className="hxm-cinzel" style={{ margin: 0, fontSize: 22, color: "var(--hxm-red)", letterSpacing: "0.04em" }}>
-            RISK DISCLOSURE
-          </h2>
-          <button className="btx-btn-ghost" onClick={onClose} style={{ padding: "6px 10px" }}>
-            <X size={14} />
+    <div
+      style={{
+        // Inline casino-interior backdrop — keeps sidebars/topbar
+        // visible, no fullscreen blocker. Lives inside .hxm-center
+        // so it fills the tab area only.
+        width: "100%",
+        minHeight: "calc(100vh - 110px)",
+        background:
+          "linear-gradient(rgba(5, 2, 3, 0.55), rgba(5, 2, 3, 0.55)), " +
+          `url(${BG_CASINO_INTERIOR_SRC}) center / cover no-repeat`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        className="btx-modal-card"
+        style={{
+          // Same 720×560 geometry as the rest of the modal family.
+          // Red border keeps the "risk" colour signal intact.
+          width: "100%",
+          maxWidth: 720,
+          minHeight: 560,
+          padding: "40px 48px",
+          borderColor: "var(--hxm-red)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div className="btx-modal-corner btx-modal-corner-tl" style={{ borderColor: "var(--hxm-red)" }} />
+        <div className="btx-modal-corner btx-modal-corner-tr" style={{ borderColor: "var(--hxm-red)" }} />
+        <div className="btx-modal-corner btx-modal-corner-bl" style={{ borderColor: "var(--hxm-red)" }} />
+        <div className="btx-modal-corner btx-modal-corner-br" style={{ borderColor: "var(--hxm-red)" }} />
+        {/* Header row — LUCKYPROTOCOL // RISK DISCLOSURE label on the
+            left, × close on the right. BACK was dropped because it
+            did the same thing as × — keep one. × uses the global gold
+            tint so it matches the rest of the modal family. */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4, gap: 12 }}>
+          <div className="hxm-bebas" style={{ fontSize: 11, color: "var(--hxm-red)", letterSpacing: "0.28em" }}>
+            LUCKYPROTOCOL // RISK DISCLOSURE
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close risk disclosure"
+            title="Close (ESC)"
+            style={{
+              background: "transparent",
+              border: "1px solid rgba(212, 175, 55, 0.4)",
+              color: "var(--hxm-gold)",
+              borderRadius: 4,
+              width: 26,
+              height: 26,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 14,
+              lineHeight: 1,
+              cursor: "pointer",
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            ×
           </button>
         </div>
-        <div className="btx-modal-divider" />
-        <div style={{ fontSize: 12, color: "var(--hxm-text)", lineHeight: 1.7 }}>
+        <h2 className="hxm-cinzel" style={{
+          margin: "2px 0 0",
+          fontSize: 24,
+          fontWeight: 900,
+          letterSpacing: "0.07em",
+          lineHeight: 1.15,
+          color: "var(--hxm-red)",
+          textShadow: "0 0 14px rgba(229,75,75,0.35)",
+        }}>
+          RISK DISCLOSURE
+        </h2>
+        <div className="btx-modal-divider" style={{ background: "linear-gradient(90deg, transparent 0%, var(--hxm-red) 50%, transparent 100%)" }} />
+        {/* Body — fits naturally inside the 560 minHeight after the
+            closing "By continuing to use the app..." paragraph was
+            trimmed, so no internal scroll needed. The flex:1 just
+            absorbs any extra vertical room so I UNDERSTAND sits at
+            the bottom edge of the card. */}
+        <div style={{
+          flex: 1,
+          fontSize: 12,
+          color: "var(--hxm-text)",
+          lineHeight: 1.7,
+        }}>
           <p>
             LUCKYPROTOCOL is <b style={{ color: "var(--hxm-red)" }}>experimental, unaudited
             software</b>. The protocol, indexer, wallet implementation, and the
@@ -17524,10 +18001,6 @@ function RiskDisclosureModal({ onClose }) {
             </div>
           </div>
 
-          <p style={{ color: "var(--hxm-text-dim)" }}>
-            By continuing to use the app you acknowledge these risks. The
-            top-of-UI banner re-appears every launch by design.
-          </p>
         </div>
         <div className="btx-modal-divider" />
         <button className="btx-btn-primary" onClick={onClose}>I UNDERSTAND</button>
@@ -17546,7 +18019,15 @@ function RiskDisclosureModal({ onClose }) {
 // Existing users with a key already configured never see this; they
 // rotate or remove the key from SETTINGS → ALCHEMY API KEY.
 // =============================================================================
-function AlchemySetupModal({ onDone }) {
+function AlchemySetupModal({ onDone, onCancel }) {
+  // ESC key dismisses for keyboard users (same affordance as
+  // OnboardModal / RiskAckModal).
+  useEffect(() => {
+    if (!onCancel) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -17574,20 +18055,81 @@ function AlchemySetupModal({ onDone }) {
     msg ? "err" : "idle";
 
   return (
-    <div className="btx-modal-blocker">
-      <div className="btx-modal-card">
+    <div
+      style={{
+        // Wallet-tab backdrop pattern (same as OnboardModal / RiskAckModal).
+        width: "100%",
+        minHeight: "calc(100vh - 110px)",
+        background:
+          "linear-gradient(rgba(5, 2, 3, 0.55), rgba(5, 2, 3, 0.55)), " +
+          `url(${BG_CASINO_INTERIOR_SRC}) center / cover no-repeat`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        className="btx-modal-card"
+        style={{
+          width: "100%",
+          maxWidth: 720,
+          minHeight: 560,
+          padding: "40px 48px",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <div className="btx-modal-corner btx-modal-corner-tl" />
         <div className="btx-modal-corner btx-modal-corner-tr" />
         <div className="btx-modal-corner btx-modal-corner-bl" />
         <div className="btx-modal-corner btx-modal-corner-br" />
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        {/* Header — LUCKYPROTOCOL // NETWORK SETUP label on the left,
+            FAST SYNC tag + × close on the right. BACK was dropped
+            (it did the same thing as ×). × dismisses via onCancel
+            (returns to dashboard); it doesn't persist the key, so
+            the gate re-fires on next visit. */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 12 }}>
           <div className="hxm-bebas" style={{ fontSize: 11, color: "var(--hxm-text-mute)", letterSpacing: "0.32em" }}>
             LUCKYPROTOCOL // NETWORK SETUP
           </div>
-          <div className="hxm-mono" style={{ fontSize: 11, color: "var(--hxm-gold)" }}>FAST SYNC</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            <div className="hxm-mono" style={{ fontSize: 11, color: "var(--hxm-gold)" }}>FAST SYNC</div>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                aria-label="Close Alchemy setup"
+                title="Close (re-prompts next visit)"
+                style={{
+                  background: "transparent",
+                  border: "1px solid rgba(212, 175, 55, 0.4)",
+                  color: "var(--hxm-gold)",
+                  borderRadius: 4,
+                  width: 26,
+                  height: 26,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
-        <h2 className="hxm-cinzel metal-gold" style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "0.06em" }}>
+        <h2 className="hxm-cinzel metal-gold" style={{
+          margin: 0,
+          fontSize: 24,
+          fontWeight: 900,
+          letterSpacing: "0.07em",
+          lineHeight: 1.15,
+        }}>
           BIND ALCHEMY API KEY
         </h2>
         <div className="btx-modal-divider" />
