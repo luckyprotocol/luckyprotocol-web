@@ -4706,6 +4706,14 @@ export default function LuckyProtocolApp() {
             )}
             {screen === "wallet" && firstRun && (
               <OnboardModal
+                onClose={() => {
+                  // User backed out of wallet setup — drop them on the
+                  // lobby (no wallet committed). Nothing has been written
+                  // to IDB yet at this point (the commit only fires from
+                  // step 4 submitPassword), so this is a true cancel.
+                  setScreen("dashboard");
+                  setActiveNav("dashboard");
+                }}
                 onDone={(pw) => {
                   setFirstRun(false);
                   walletSyncCache().then((cache) => {
@@ -14043,7 +14051,7 @@ function SystemLockOverlay({ lock, onRetry }) {
   );
 }
 
-function OnboardModal({ onDone }) {
+function OnboardModal({ onDone, onClose }) {
   const [step, setStep] = useState(1);
   const [seed, setSeed] = useState([]);
   const [verifyIdx, setVerifyIdx] = useState([]);
@@ -14119,9 +14127,44 @@ function OnboardModal({ onDone }) {
     4: "SET LOGIN PASSWORD",
   };
 
+  // Allow ESC + click-outside to dismiss — only meaningful when this
+  // modal lives inside the WALLET tab (the casino lobby is now the
+  // landing page, so the user can always retreat). The legacy "blocker"
+  // semantics (modal MUST be completed before anything else) no longer
+  // apply: onClose drops the user back to the dashboard without
+  // committing anything to IDB.
+  useEffect(() => {
+    if (!onClose) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="btx-modal-blocker">
-      <div className="btx-modal-card">
+    <div
+      className="btx-modal-blocker"
+      onClick={(e) => {
+        // Click anywhere outside the inner card to close. The card
+        // catches clicks via stopPropagation below, so this only
+        // fires when the user clicks the dim backdrop.
+        if (onClose && e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        // Drop the casino-interior photo backdrop here. Inside the
+        // WALLET tab this modal sits on top of the rest of the app
+        // (sidebar + topbar still visible behind it), and the photo
+        // backdrop fights with that layout. A plain dim overlay reads
+        // as "modal" without yet another competing surface.
+        background: "rgba(5, 2, 3, 0.78)",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        className="btx-modal-card"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="btx-modal-corner btx-modal-corner-tl" />
         <div className="btx-modal-corner btx-modal-corner-tr" />
         <div className="btx-modal-corner btx-modal-corner-bl" />
@@ -14141,6 +14184,31 @@ function OnboardModal({ onDone }) {
                 style={{ padding: "7px 16px", fontSize: 12 }}
               >
                 ← BACK
+              </button>
+            )}
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close onboarding"
+                title="Close (ESC)"
+                style={{
+                  background: "transparent",
+                  border: "1px solid rgba(212, 175, 55, 0.4)",
+                  color: "var(--hxm-gold)",
+                  borderRadius: 4,
+                  width: 28,
+                  height: 28,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                ×
               </button>
             )}
           </div>
