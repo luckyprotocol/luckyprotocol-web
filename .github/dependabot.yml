@@ -1,0 +1,63 @@
+# Dependabot — weekly automated dep-bump PRs.
+#
+# Why this matters for a wallet repo: a single compromised npm transitive
+# dep (e.g. a base32 encoder, a UI tooltip lib) running inside the same
+# origin as the user's Argon2id-decrypted mnemonic is a full-mnemonic
+# exfiltration primitive. Stale deps with known CVEs are the slowest-
+# obvious version of that attack. Dependabot collapses the latency
+# between "CVE published" and "we've shipped the fix" from "whenever
+# someone remembers to run npm audit" to "next Monday morning".
+#
+# Open PRs land on `main` only after CI passes (see .github/workflows/ci.yml
+# — `frontend (lint + build)`). Branch protection requires manual review
+# before merge, so Dependabot can never auto-deploy without a human.
+#
+# Scope: limit to direct npm deps + GitHub Actions in this repo. No
+# Docker, no submodules.
+
+version: 2
+updates:
+  # ----- npm (the bundled JS) -----
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    # Group non-major bumps into a single weekly PR — a flood of one
+    # PR per dep wastes review time. Major bumps stay as separate PRs
+    # because they often contain breaking changes worth their own
+    # context window.
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    # Cap so we don't get 50 PRs in week one. Security alerts ignore
+    # this cap (they always open).
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "automated"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # ----- GitHub Actions (ci.yml uses actions/checkout, actions/setup-node) -----
+  # CVEs in CI actions can leak secrets via SLSA-style supply chain
+  # attacks. Keep these current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

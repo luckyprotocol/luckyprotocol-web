@@ -1,5 +1,19 @@
 # LUCKYPROTOCOL — Web Edition
 
+> ## ⚠️ ONLY OFFICIAL DOMAIN: [`lucky-protocol.xyz`](https://lucky-protocol.xyz)
+>
+> Any other domain — `lucky-protocol.com`, `luckyprotocol.xyz`, `lucky-protocol.org`,
+> `luckyprotocol.io`, `lucky-protocol.app`, etc. — **is not us**. Entering your
+> 12-word seed or password on a clone domain will lose every satoshi tied to
+> that wallet. **Always verify the URL bar shows `lucky-protocol.xyz` before
+> typing your password.** Bookmark the real URL. Do not trust links from
+> Discord / Telegram / Twitter / search-engine ads.
+>
+> This project does not maintain a Twitter, Discord, or Telegram. Anyone
+> claiming otherwise is impersonating it.
+
+---
+
 **Proof of Luck.** A Bitcoin-mainnet probabilistic-minting protocol + UTXO-bound token system, packaged as a **pure browser wallet** with an **in-browser indexer**. No servers. No backend. No cloud database. Open the page → your device runs the whole stack.
 
 Token issuance is settled by Bitcoin's own proof-of-work entropy: each MINE tx's outcome is a deterministic function of the confirming block's hash. No miner can grind a profitable tail without out-spending the prize. No deployer can pre-mint. No indexer can override the ledger. Luck — the bit-for-bit equidistribution of block-hash bits — is the consensus.
