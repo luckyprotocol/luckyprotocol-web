@@ -7920,31 +7920,6 @@ function TopStatsBar({ state, chainState, network, onChainBets, scanReady }) {
   const sync = useSyncStatus();
   const w = state.wallet;
   const btc = (w.btc_sats / 1e8).toFixed(8);
-
-  // Pre-onboarding placeholder bar. We render the same number of tiles
-  // in the same order/labels so the layout doesn't shift the instant
-  // the user finishes onboarding (the tiles just swap "—" for live
-  // values in place). Nothing here references chainState / sync /
-  // network — none of those have meaningful values yet, and accessing
-  // them through optional chaining would still surface "0 sat" /
-  // "no chain sync yet" subtext that's slightly worse than a clean dash.
-  if (!scanReady) {
-    return (
-      <div className="hxm-topbar">
-        <StatTile icon={<Bitcoin size={20} color="#f7a51b" />} label="WALLET BTC"    value="—" sub="set up wallet to populate" />
-        <StatTile icon={<BlockIcon />}                          label="CURRENT BLOCK"  value="—" sub="chain sync paused"           mono />
-        <StatTile icon={<BlockIcon />}                          label="INDEXER SCAN"   value="—" sub="indexer paused"               mono />
-        <StatTile icon={<Zap size={20} color="#f5dc89" />}      label="MIN FEE RATE"   value="—" sub="fee feed paused"              mono />
-        <StatTile icon={<RoundIcon />}                          label="PENDING BETS"   value="—" sub="no wallet yet" />
-        <StatTile
-          icon={<span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", background: "var(--hxm-text-mute)" }} />}
-          label="STATUS"
-          value="IDLE"
-          sub="awaiting onboarding"
-        />
-      </div>
-    );
-  }
  // PENDING bet count = on-chain bets that have been broadcast but
  // haven't settled yet (no outcome populated). `onChainBets` is the
  // shared LS-backed bets log (`luckyprotocol.bets.v1`), refreshed every
@@ -7991,6 +7966,32 @@ function TopStatsBar({ state, chainState, network, onChainBets, scanReady }) {
   }, [network, syncDone]);
 
   const minRate = nextBlockFee?.minFee;
+
+  // Pre-onboarding placeholder bar. Rendered AFTER every hook above so
+  // the rules-of-hooks invariant holds (hook order is identical across
+  // renders regardless of scanReady). Same six tiles in the same order
+  // as the live bar so the layout doesn't shift once gate releases —
+  // tiles just swap "—" placeholders for live values in place. We
+  // never reference chainState / sync / network here — none of those
+  // have meaningful values yet, and rendering stale zeros / "no sync"
+  // text would be slightly worse than a clean dash.
+  if (!scanReady) {
+    return (
+      <div className="hxm-topbar">
+        <StatTile icon={<Bitcoin size={20} color="#f7a51b" />} label="WALLET BTC"    value="—" sub="set up wallet to populate" />
+        <StatTile icon={<BlockIcon />}                          label="CURRENT BLOCK"  value="—" sub="chain sync paused"           mono />
+        <StatTile icon={<BlockIcon />}                          label="INDEXER SCAN"   value="—" sub="indexer paused"               mono />
+        <StatTile icon={<Zap size={20} color="#f5dc89" />}      label="MIN FEE RATE"   value="—" sub="fee feed paused"              mono />
+        <StatTile icon={<RoundIcon />}                          label="PENDING BETS"   value="—" sub="no wallet yet" />
+        <StatTile
+          icon={<span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", background: "var(--hxm-text-mute)" }} />}
+          label="STATUS"
+          value="IDLE"
+          sub="awaiting onboarding"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="hxm-topbar">
