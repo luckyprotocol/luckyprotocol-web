@@ -1,0 +1,79 @@
+# Caddyfile for self-hosted LUCKYPROTOCOL web deployment.
+#
+# Usage:
+#   1. Build the SPA:    npm ci && npm run build
+#   2. Copy dist/ to:    /var/www/luckyprotocol/
+#   3. Replace the domain below with your real one.
+#   4. Run:              caddy run --config Caddyfile
+#
+# Caddy automatically obtains + renews Let's Encrypt certificates as
+# long as the domain's A/AAAA records point at this server's public IP
+# and ports 80 + 443 are reachable.
+#
+# Why caddy: zero-config TLS, HTTP/3 by default, smallest config of any
+# production-grade web server. If you prefer nginx, the equivalent
+# config lives in DEPLOY.md.
+
+luckyprotocol.example.com {
+	# Path to your built static files (the contents of `dist/`).
+	root * /var/www/luckyprotocol
+
+	# Gzip + brotli/zstd compression. Cuts the ~1.3 MB JS bundle to
+	# ~360 KB on the wire.
+	encode zstd gzip
+
+	# SPA fallback — any unknown path serves /index.html so the
+	# client-side router can take over. `try_files` checks the literal
+	# path first, then index.html.
+	try_files {path} /index.html
+
+	file_server
+
+	# Long-cache the content-addressed assets (Vite emits hashed
+	# filenames). Set a short cache on the SW + manifest so updates
+	# land fast.
+	@hashedAssets path /assets/*
+	header @hashedAssets Cache-Control "public, max-age=31536000, immutable"
+
+	@swOrManifest path /sw.js /manifest.webmanifest
+	header @swOrManifest Cache-Control "public, max-age=0, must-revalidate"
+
+	# Security headers — identical policy to public/_headers and
+	# vercel.json. The CSP is the most important one: it's the only
+	# thing standing between an XSS in a dependency and the user's
+	# IndexedDB-encrypted mnemonic.
+	#
+	# If a user wants to also use a self-hosted Bitcoin Core RPC via
+	# Settings → BTC ENDPOINTS, they'll need to append that origin to
+	# the connect-src list themselves; the build-time CSP can't know
+	# their node's hostname.
+	header {
+		Content-Security-Policy   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://mempool.space https://blockstream.info https://*.alchemy.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		Permissions-Policy        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), bluetooth=()"
+		Cross-Origin-Opener-Policy   "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		# Hide the default `Server: Caddy` banner.
+		-Server
+	}
+}
+
+# ------------------------------------------------------------
+# OPTIONAL: front your own Bitcoin Core RPC so the browser can
+# reach it with CORS headers. Uncomment + customize. The path
+# below assumes Core is listening on the default 8332 over
+# loopback only.
+# ------------------------------------------------------------
+# node.luckyprotocol.example.com {
+# 	reverse_proxy 127.0.0.1:8332
+# 	header {
+# 		Access-Control-Allow-Origin  "https://luckyprotocol.example.com"
+# 		Access-Control-Allow-Methods "POST, OPTIONS"
+# 		Access-Control-Allow-Headers "Content-Type, Authorization"
+# 	}
+# 	@options method OPTIONS
+# 	respond @options 204
+# }

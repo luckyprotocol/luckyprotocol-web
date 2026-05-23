@@ -1,0 +1,64 @@
+# Cloudflare Pages + Netlify static-header file.
+# Applies HTTP response headers to every path served from /. Critical for a
+# self-custody wallet — without CSP an XSS in any dependency could exfiltrate
+# the user's IndexedDB-stored mnemonic ciphertext + their session password.
+#
+# Test after deploy by opening DevTools → Network → click the document
+# request and confirm every header below appears in the "Response Headers".
+
+/*
+  # Content-Security-Policy — the #1 defense against supply-chain XSS.
+  #
+  # script-src 'self' only:                no inline <script>, no eval(),
+  #                                        no external scripts. The build
+  #                                        is fully bundled so this is fine.
+  # 'wasm-unsafe-eval':                    @noble/hashes argon2 needs WASM.
+  # style-src 'self' 'unsafe-inline':      Recharts + lucide-react inline
+  #                                        a small amount of style. Could
+  #                                        be tightened later with nonces.
+  # connect-src — every host the indexer + wallet may fetch from. ANY new
+  #               endpoint added (e.g. a custom user Bitcoin Core URL via
+  #               Settings) lives outside this list and the browser blocks
+  #               it. That's WHY we don't include `*` here: it's the
+  #               trade-off for the safety net.
+  #
+  # NB: connect-src does NOT cover user-configured Bitcoin Core RPC URLs
+  # — those are typed in by the user at runtime, so we can't enumerate
+  # them at build time. Users hosting their own node will see CSP
+  # violations until they ALSO add their node's origin to a custom CSP
+  # header on their deployment. The Settings → BTC ENDPOINTS panel
+  # warns about this.
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://mempool.space https://blockstream.info https://*.alchemy.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
+
+  # Force HTTPS for 2 years + preload list. Once deployed and the SSL is
+  # confirmed working, you can submit the domain to
+  # https://hstspreload.org so even first-load requests are HTTPS.
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+
+  # Browser hardening — disable MIME sniffing (so a wrongly-typed file
+  # can't become an executable), block in-frame embedding (clickjacking
+  # protection — though frame-ancestors above is the stronger version),
+  # and restrict device APIs the wallet doesn't need.
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), bluetooth=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+# The Service Worker file itself must be served without long caching so
+# new releases land within a single visit. vite-plugin-pwa emits this at
+# /sw.js by default.
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Manifest is small; revalidate every time so PWA install metadata updates.
+/manifest.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
+  Content-Type: application/manifest+json
+
+# Hashed JS/CSS chunks in /assets/ are content-addressed (Vite appends a
+# hash to the filename), so they can be cached forever — a new build
+# produces a new filename and the old one just stops being referenced.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

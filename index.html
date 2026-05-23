@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#050203" />
+
+    <title>LUCKYPROTOCOL · Proof of Luck on Bitcoin</title>
+    <meta name="description" content="Probabilistic-mint protocol tokens on Bitcoin mainnet. Self-custody wallet, in-browser indexer, no servers. Bet block-hash outcomes for fungible tokens — every mint, transfer, and deploy is a real Bitcoin transaction." />
+    <meta name="application-name" content="LUCKYPROTOCOL" />
+    <meta name="apple-mobile-web-app-title" content="LUCKYPROTOCOL" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Wallet-app hygiene: do not let search engines index the user-
+         visible app surface and do not embed in iframes from anywhere. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+
+    <!-- Open Graph / Twitter card — used by Telegram, Twitter, Discord etc.
+         when someone pastes the URL. The icon doubles as the share image
+         because it's the same brand mark on the lobby screen. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="LUCKYPROTOCOL · Proof of Luck on Bitcoin" />
+    <meta property="og:description" content="Probabilistic-mint protocol tokens on Bitcoin mainnet. Self-custody wallet, in-browser indexer." />
+    <meta property="og:image" content="/icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="LUCKYPROTOCOL" />
+    <meta name="twitter:description" content="Proof of Luck on Bitcoin mainnet." />
+    <meta name="twitter:image" content="/icon.png" />
+
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <style>
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        background: #050203;
+        color: #e9d4a4;
+        height: 100%;
+        font-family: system-ui, sans-serif;
+      }
+      #root { display: flex; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div style="padding:40px; max-width:540px; margin:60px auto; color:#e9d4a4;">
+        <h1 style="color:#d4af37;">LUCKYPROTOCOL requires JavaScript</h1>
+        <p>This is a self-custody Bitcoin wallet + protocol indexer that runs
+        entirely in your browser. JavaScript is required for the wallet's
+        Argon2id key derivation, AES-256-GCM encryption, BIP39 seed
+        generation, and Esplora-direct chain queries — none of it can be
+        served from a server.</p>
+        <p>Re-enable JavaScript and reload. No data is sent off this device.</p>
+      </div>
+    </noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

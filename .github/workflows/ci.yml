@@ -1,0 +1,34 @@
+# LUCKYPROTOCOL continuous-integration smoke tests.
+#
+# Single job: install deps + lint + production build. The repo is the
+# web app now (no Rust sidecar, no Tauri shell) so there's nothing else
+# to check at CI time. A green run means `npm ci && npm run build`
+# produces a deployable `dist/` on a clean Ubuntu runner.
+#
+# We do NOT run the dev server or the indexer cold-scan in CI — those
+# hit external Bitcoin endpoints (Esplora / Alchemy / mempool.space)
+# which would be flaky and burn other users' rate-limit buckets. The
+# build verifies the import graph + bundle shape; runtime correctness
+# is verified by humans against mainnet.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: frontend (lint + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

@@ -1,0 +1,230 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <radialGradient id="navy" cx="50%" cy="50%" r="72%">
+      <stop offset="0%" stop-color="#2c3e80"/>
+      <stop offset="55%" stop-color="#1d2d6e"/>
+      <stop offset="100%" stop-color="#0a1340"/>
+    </radialGradient>
+    <radialGradient id="medallionShine" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.02"/>
+    </radialGradient>
+    <pattern id="fineDiaper" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)">
+      <path d="M0 2 L4 2 M2 0 L2 4" stroke="#ffffff" stroke-width="0.18" opacity="0.12"/>
+    </pattern>
+    <pattern id="starField" patternUnits="userSpaceOnUse" width="14" height="14">
+      <circle cx="3" cy="4" r="0.35" fill="#ffffff" opacity="0.55"/>
+      <circle cx="9" cy="2" r="0.22" fill="#ffffff" opacity="0.4"/>
+      <circle cx="11" cy="9" r="0.32" fill="#ffffff" opacity="0.5"/>
+      <circle cx="5" cy="11" r="0.22" fill="#ffffff" opacity="0.35"/>
+      <circle cx="7" cy="6" r="0.18" fill="#ffffff" opacity="0.3"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100" height="140" fill="url(#navy)"/>
+  <rect width="100" height="140" fill="url(#fineDiaper)"/>
+
+  <!-- Triple gold-equivalent (white) borders -->
+  <rect x="2" y="2" width="96" height="136" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+  <rect x="4.5" y="4.5" width="91" height="131" fill="none" stroke="#ffffff" stroke-width="0.4" opacity="0.6"/>
+  <rect x="6" y="6" width="88" height="128" fill="none" stroke="#ffffff" stroke-width="0.3" opacity="0.45"/>
+
+  <!-- ====== DENSE VICTORIAN BORDER SCROLLWORK ====== -->
+  <!-- Top scroll band (running along inside of top border, no figures) -->
+  <g stroke="#ffffff" stroke-width="0.32" fill="none" opacity="0.8">
+    <path d="M14 11 Q18 8 22 11 Q26 14 30 11 Q34 8 38 11 Q42 14 46 11 Q50 8 54 11 Q58 14 62 11 Q66 8 70 11 Q74 14 78 11 Q82 8 86 11"/>
+    <!-- Tiny circle accents along the wave -->
+    <circle cx="22" cy="11" r="0.4" fill="#ffffff"/>
+    <circle cx="38" cy="11" r="0.4" fill="#ffffff"/>
+    <circle cx="54" cy="11" r="0.4" fill="#ffffff"/>
+    <circle cx="70" cy="11" r="0.4" fill="#ffffff"/>
+    <circle cx="86" cy="11" r="0.4" fill="#ffffff"/>
+  </g>
+  <!-- Bottom scroll band (mirrored) -->
+  <g stroke="#ffffff" stroke-width="0.32" fill="none" opacity="0.8">
+    <path d="M14 129 Q18 132 22 129 Q26 126 30 129 Q34 132 38 129 Q42 126 46 129 Q50 132 54 129 Q58 126 62 129 Q66 132 70 129 Q74 126 78 129 Q82 132 86 129"/>
+    <circle cx="22" cy="129" r="0.4" fill="#ffffff"/>
+    <circle cx="38" cy="129" r="0.4" fill="#ffffff"/>
+    <circle cx="54" cy="129" r="0.4" fill="#ffffff"/>
+    <circle cx="70" cy="129" r="0.4" fill="#ffffff"/>
+    <circle cx="86" cy="129" r="0.4" fill="#ffffff"/>
+  </g>
+  <!-- Left vertical scroll -->
+  <g stroke="#ffffff" stroke-width="0.32" fill="none" opacity="0.8">
+    <path d="M11 24 Q8 28 11 32 Q14 36 11 40 Q8 44 11 48 Q14 52 11 56 Q8 60 11 64 Q14 68 11 72 Q8 76 11 80 Q14 84 11 88 Q8 92 11 96 Q14 100 11 104 Q8 108 11 112 Q14 116 11 120"/>
+  </g>
+  <!-- Right vertical scroll -->
+  <g stroke="#ffffff" stroke-width="0.32" fill="none" opacity="0.8">
+    <path d="M89 24 Q92 28 89 32 Q86 36 89 40 Q92 44 89 48 Q86 52 89 56 Q92 60 89 64 Q86 68 89 72 Q92 76 89 80 Q86 84 89 88 Q92 92 89 96 Q86 100 89 104 Q92 108 89 112 Q86 116 89 120"/>
+  </g>
+
+  <!-- ====== CORNER QUATREFOIL ORNAMENTS (denser) ====== -->
+  <g stroke="#ffffff" stroke-width="0.5" fill="none">
+    <!-- Top-left -->
+    <g transform="translate(11.5,11.5)">
+      <circle cx="0" cy="0" r="2.2"/>
+      <circle cx="0" cy="0" r="0.9" fill="#ffffff"/>
+      <path d="M-2.5 0 L-3.5 0 M2.5 0 L3.5 0 M0 -2.5 L0 -3.5 M0 2.5 L0 3.5"/>
+      <path d="M-2 -2 L-3 -3 M2 -2 L3 -3 M-2 2 L-3 3 M2 2 L3 3"/>
+    </g>
+    <!-- Top-right -->
+    <g transform="translate(88.5,11.5)">
+      <circle cx="0" cy="0" r="2.2"/>
+      <circle cx="0" cy="0" r="0.9" fill="#ffffff"/>
+      <path d="M-2.5 0 L-3.5 0 M2.5 0 L3.5 0 M0 -2.5 L0 -3.5 M0 2.5 L0 3.5"/>
+      <path d="M-2 -2 L-3 -3 M2 -2 L3 -3 M-2 2 L-3 3 M2 2 L3 3"/>
+    </g>
+    <!-- Bottom-left -->
+    <g transform="translate(11.5,128.5)">
+      <circle cx="0" cy="0" r="2.2"/>
+      <circle cx="0" cy="0" r="0.9" fill="#ffffff"/>
+      <path d="M-2.5 0 L-3.5 0 M2.5 0 L3.5 0 M0 -2.5 L0 -3.5 M0 2.5 L0 3.5"/>
+      <path d="M-2 -2 L-3 -3 M2 -2 L3 -3 M-2 2 L-3 3 M2 2 L3 3"/>
+    </g>
+    <!-- Bottom-right -->
+    <g transform="translate(88.5,128.5)">
+      <circle cx="0" cy="0" r="2.2"/>
+      <circle cx="0" cy="0" r="0.9" fill="#ffffff"/>
+      <path d="M-2.5 0 L-3.5 0 M2.5 0 L3.5 0 M0 -2.5 L0 -3.5 M0 2.5 L0 3.5"/>
+      <path d="M-2 -2 L-3 -3 M2 -2 L3 -3 M-2 2 L-3 3 M2 2 L3 3"/>
+    </g>
+  </g>
+
+  <!-- ====== TOP + BOTTOM ROSETTE MEDALLIONS (six-petal) ====== -->
+  <g transform="translate(50,18)" stroke="#ffffff" stroke-width="0.5" fill="none">
+    <!-- 6-petal flower -->
+    <circle cx="0" cy="0" r="3" fill="rgba(255,255,255,0.06)"/>
+    <circle cx="0" cy="0" r="1.5"/>
+    <circle cx="0" cy="0" r="0.7" fill="#ffffff"/>
+    <g transform="rotate(0)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(60)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(120)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(180)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(240)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(300)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+  </g>
+  <g transform="translate(50,122)" stroke="#ffffff" stroke-width="0.5" fill="none">
+    <circle cx="0" cy="0" r="3" fill="rgba(255,255,255,0.06)"/>
+    <circle cx="0" cy="0" r="1.5"/>
+    <circle cx="0" cy="0" r="0.7" fill="#ffffff"/>
+    <g transform="rotate(0)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(60)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(120)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(180)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(240)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+    <g transform="rotate(300)"><ellipse cx="0" cy="-2.4" rx="0.7" ry="1.4"/></g>
+  </g>
+
+  <!-- ====== SIDE LOZENGE / DIAMOND ORNAMENTS ====== -->
+  <g stroke="#ffffff" stroke-width="0.4" fill="none">
+    <g transform="translate(11.5,42)">
+      <path d="M0 -3 L2 0 L0 3 L-2 0 Z"/>
+      <circle cx="0" cy="0" r="0.5" fill="#ffffff"/>
+    </g>
+    <g transform="translate(11.5,98)">
+      <path d="M0 -3 L2 0 L0 3 L-2 0 Z"/>
+      <circle cx="0" cy="0" r="0.5" fill="#ffffff"/>
+    </g>
+    <g transform="translate(88.5,42)">
+      <path d="M0 -3 L2 0 L0 3 L-2 0 Z"/>
+      <circle cx="0" cy="0" r="0.5" fill="#ffffff"/>
+    </g>
+    <g transform="translate(88.5,98)">
+      <path d="M0 -3 L2 0 L0 3 L-2 0 Z"/>
+      <circle cx="0" cy="0" r="0.5" fill="#ffffff"/>
+    </g>
+  </g>
+
+  <!-- ====== STAR FIELD BEHIND MEDALLION ====== -->
+  <ellipse cx="50" cy="70" rx="24" ry="36" fill="url(#starField)" opacity="0.7"/>
+
+  <!-- ====== LAUREL BRANCHES FRAMING MEDALLION ====== -->
+  <g stroke="#ffffff" stroke-width="0.35" fill="none" opacity="0.85">
+    <!-- Left laurel: stem + paired leaves -->
+    <path d="M27 92 Q26 82 28 72 Q31 62 32 52"/>
+    <g fill="#ffffff" fill-opacity="0.55">
+      <ellipse cx="25" cy="88" rx="1.6" ry="0.7" transform="rotate(-30 25 88)"/>
+      <ellipse cx="29" cy="86" rx="1.6" ry="0.7" transform="rotate(20 29 86)"/>
+      <ellipse cx="25" cy="80" rx="1.6" ry="0.7" transform="rotate(-30 25 80)"/>
+      <ellipse cx="29" cy="78" rx="1.6" ry="0.7" transform="rotate(20 29 78)"/>
+      <ellipse cx="26" cy="72" rx="1.6" ry="0.7" transform="rotate(-30 26 72)"/>
+      <ellipse cx="30" cy="70" rx="1.6" ry="0.7" transform="rotate(20 30 70)"/>
+      <ellipse cx="28" cy="63" rx="1.6" ry="0.7" transform="rotate(-30 28 63)"/>
+      <ellipse cx="32" cy="62" rx="1.6" ry="0.7" transform="rotate(20 32 62)"/>
+    </g>
+    <!-- Right laurel (mirror) -->
+    <path d="M73 92 Q74 82 72 72 Q69 62 68 52"/>
+    <g fill="#ffffff" fill-opacity="0.55">
+      <ellipse cx="75" cy="88" rx="1.6" ry="0.7" transform="rotate(30 75 88)"/>
+      <ellipse cx="71" cy="86" rx="1.6" ry="0.7" transform="rotate(-20 71 86)"/>
+      <ellipse cx="75" cy="80" rx="1.6" ry="0.7" transform="rotate(30 75 80)"/>
+      <ellipse cx="71" cy="78" rx="1.6" ry="0.7" transform="rotate(-20 71 78)"/>
+      <ellipse cx="74" cy="72" rx="1.6" ry="0.7" transform="rotate(30 74 72)"/>
+      <ellipse cx="70" cy="70" rx="1.6" ry="0.7" transform="rotate(-20 70 70)"/>
+      <ellipse cx="72" cy="63" rx="1.6" ry="0.7" transform="rotate(30 72 63)"/>
+      <ellipse cx="68" cy="62" rx="1.6" ry="0.7" transform="rotate(-20 68 62)"/>
+    </g>
+  </g>
+
+  <!-- ====== CENTRAL MEDALLION FRAME (oval) ====== -->
+  <ellipse cx="50" cy="70" rx="20" ry="32" fill="url(#medallionShine)" stroke="#ffffff" stroke-width="0.9"/>
+  <ellipse cx="50" cy="70" rx="18" ry="30" fill="none" stroke="#ffffff" stroke-width="0.3" opacity="0.65"/>
+
+  <!-- ====== CROWN / DIADEM above angel head ====== -->
+  <g stroke="#ffffff" stroke-width="0.3" fill="none">
+    <path d="M46 47 L47 44 L48 47 L49 44 L50 47 L51 44 L52 47 L53 44 L54 47"/>
+    <path d="M46 47 L54 47" stroke-width="0.5"/>
+    <circle cx="50" cy="44.5" r="0.45" fill="#ffffff"/>
+  </g>
+
+  <!-- ====== ANGEL: halo (double ring with inner glow) ====== -->
+  <g>
+    <circle cx="50" cy="54" r="5.4" fill="rgba(255,255,255,0.08)"/>
+    <circle cx="50" cy="54" r="5.4" fill="none" stroke="#ffffff" stroke-width="0.55"/>
+    <circle cx="50" cy="54" r="6.8" fill="none" stroke="#ffffff" stroke-width="0.22" opacity="0.5"/>
+    <circle cx="50" cy="54" r="4" fill="none" stroke="#ffffff" stroke-width="0.18" opacity="0.45"/>
+  </g>
+
+  <!-- ====== ANGEL: head ====== -->
+  <circle cx="50" cy="55" r="2.8" fill="#ffffff"/>
+  <circle cx="50" cy="55" r="2.8" fill="none" stroke="#1d2d6e" stroke-width="0.3"/>
+
+  <!-- ====== ANGEL: wings (more feathered) ====== -->
+  <g stroke="#ffffff" stroke-width="0.4" fill="#ffffff" fill-opacity="0.32">
+    <path d="M48.5 60 Q38 56 32 67 Q33 70 36 71 Q41 69.5 45 68 Q47 66 48.5 62.5 Z"/>
+    <path d="M51.5 60 Q62 56 68 67 Q67 70 64 71 Q59 69.5 55 68 Q53 66 51.5 62.5 Z"/>
+  </g>
+  <!-- Wing feather rachis lines -->
+  <g stroke="#ffffff" stroke-width="0.22" fill="none" opacity="0.7">
+    <path d="M40 62 Q42 64.5 44 66"/>
+    <path d="M37 65 Q40 67 44 68"/>
+    <path d="M34 68 Q38 69.5 43 70"/>
+    <path d="M60 62 Q58 64.5 56 66"/>
+    <path d="M63 65 Q60 67 56 68"/>
+    <path d="M66 68 Q62 69.5 57 70"/>
+  </g>
+
+  <!-- ====== ANGEL: robe (bell shape) ====== -->
+  <path d="M48 60 Q44 76 42 89 Q50 91 58 89 Q56 76 52 60 Z"
+        fill="#ffffff" fill-opacity="0.5" stroke="#ffffff" stroke-width="0.35"/>
+  <g stroke="#1d2d6e" stroke-width="0.25" fill="none" opacity="0.6">
+    <path d="M46 70 Q46.5 80 45.5 87"/>
+    <path d="M48 65 L48 89"/>
+    <path d="M50 64 L50 89"/>
+    <path d="M52 65 L52 89"/>
+    <path d="M54 70 Q53.5 80 54.5 87"/>
+  </g>
+  <!-- Belt -->
+  <path d="M44 75 L56 75" stroke="#ffffff" stroke-width="0.4" opacity="0.85"/>
+
+  <!-- ====== Small accent stars at field corners (inside medallion) ====== -->
+  <g fill="#ffffff">
+    <path d="M38 46 L38.4 47 L39.4 47.1 L38.65 47.85 L38.85 48.85 L38 48.35 L37.15 48.85 L37.35 47.85 L36.6 47.1 L37.6 47 Z" opacity="0.7"/>
+    <path d="M62 46 L62.4 47 L63.4 47.1 L62.65 47.85 L62.85 48.85 L62 48.35 L61.15 48.85 L61.35 47.85 L60.6 47.1 L61.6 47 Z" opacity="0.7"/>
+    <circle cx="36" cy="83" r="0.45" opacity="0.6"/>
+    <circle cx="64" cy="83" r="0.45" opacity="0.6"/>
+    <circle cx="38" cy="93" r="0.4" opacity="0.55"/>
+    <circle cx="62" cy="93" r="0.4" opacity="0.55"/>
+  </g>
+</svg>

@@ -1,0 +1,73 @@
+# Build outputs
+dist/
+dist-ssr/
+node_modules/
+**/node_modules/
+**/target/
+
+# Vite + bundler caches
+.vite/
+*.local
+
+# Service Worker dev-mode artifacts (vite-plugin-pwa)
+dev-dist/
+sw.js
+workbox-*.js
+registerSW.js
+
+# IDE / editor scratch
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+.vite-dev.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+
+# IndexedDB / browser-cache export dumps (developer debugging)
+*.idbdump
+
+# ---------------------------------------------------------------------------
+# Local-only sibling directories — kept on disk for the maintainer's
+# reference but never tracked in the public web repo. The public repo
+# IS the web app; nothing else.
+# ---------------------------------------------------------------------------
+
+# Whitepaper drafts — work-in-progress, not part of the deployable site
+WHITEPAPER.md
+WHITEPAPER.zh-CN.md
+
+# Desktop (Tauri 2) edition — superseded by this web build but kept
+# locally so old desktop installs can still be debugged / rebuilt
+luckyprotocol-app/
+
+# Rust reference indexer — useful for verifying the JS in-browser
+# indexer's outputs against a known-good implementation, but not part
+# of what we ship to users (they run the JS indexer inside their browser)
+luckyprotocol-indexer/
+
+# Leftover folder from the pre-flatten repo layout (the old
+# luckyprotocol-web/ subdirectory whose contents have been moved up
+# to the repo root). Kept gitignored so any stale artifacts in there
+# don't sneak back into the index.
+luckyprotocol-web/
+
+# Staging scripts used to prepare this tree (not part of the project)
+/_stage.py
+/_strip_cjk.py
+/_scrub_dev.py
+/_scan_pii.py
