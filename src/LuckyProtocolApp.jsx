@@ -2470,8 +2470,35 @@ export default function LuckyProtocolApp() {
  // truth.
       await migrateAlchemyKeyIfNeeded();
       if (cancelled) return;
+ // Diagnostic: stamp the boot-time wallet state into the console
+ // so when a user reports "every visit asks me to create a new
+ // wallet" we can tell exactly which side of the persistence
+ // bridge dropped the data. The three observable values:
+ //   - LS cache hit: hasWallet() === true  -> sync gate already
+ //     skipped the OnboardModal at first paint
+ //   - IDB hit: walletSyncCache() returned a cache object -> the
+ //     authoritative encrypted blob survived the last close
+ //   - Resolution: which of (kept LS / repopulated LS from IDB /
+ //     wiped stale LS / never had either) actually happened
+ // If LS+IDB both empty on a returning user, the user's browser
+ // is wiping storage between sessions (private mode, ITP after 7
+ // days, "clear on close" setting, extension interference) —
+ // not a code bug.
+      const lsHit = hasWallet();
       const cache = await walletSyncCache();
       if (cancelled) return;
+      let resolution;
+      if (cache && !lsHit) resolution = "repopulated-LS-from-IDB";
+      else if (cache && lsHit) resolution = "both-agree";
+      else if (!cache && lsHit) resolution = "wiped-stale-LS";
+      else resolution = "first-run-or-cleared-both";
+      // eslint-disable-next-line no-console
+      console.log(
+        "[wallet] boot persistence check —",
+        "LS:", lsHit ? "present" : "EMPTY",
+        "· IDB:", cache ? "present" : "EMPTY",
+        "· resolution:", resolution,
+      );
       if (cache) {
         setWalletMeta(cache);
         setFirstRun(false);
@@ -4443,54 +4470,33 @@ export default function LuckyProtocolApp() {
     sessionPassword, walletMeta, setToast,
   };
 
- // When any "blocking" boot modal is up (onboarding, alchemy, risk
- // ack, password unlock), skip the main UI entirely so the casino-
- // interior backdrop on.btx-modal-blocker sits on a clean dark
- // canvas instead of half-showing the sidebar / viewport behind it.
- // The user reads the modal as a focused first-screen rather than
- // "the app loaded but is half-blocked".
+ // Only block the main UI when a wallet ALREADY EXISTS and is in a
+ // mid-onboarding state (locked / needs Alchemy / needs risk ack).
+ // Pre-wallet users land on the casino lobby itself — they can
+ // browse the rooms and stats without being interrogated at the
+ // door. The OnboardModal moves inside the WALLET tab (see the
+ // main-app branch below) where it's the user's deliberate choice
+ // to set up a wallet.
+ //
+ // needAlchemy / needRiskAck still fire here once walletMeta exists
+ // because their gate is "must be set up before any signing op", and
+ // the moment a wallet exists the next signing op is one click away.
   const inBootModal =
-    firstRun ||
-    needAlchemy ||
-    needRiskAck ||
-    (walletMeta?.address && !sessionPassword);
+    walletMeta?.address &&
+    (!sessionPassword || needAlchemy || needRiskAck);
 
   if (inBootModal) {
     return (
       <div className="hxm-app">
         <CasinoCss />
         <BtxSharedCss />
-        {firstRun && (
-          <OnboardModal
-            onDone={(pw) => {
-              setFirstRun(false);
-              walletSyncCache().then((cache) => {
-                if (cache) setWalletMeta(cache);
-              });
-              if (pw) setSessionPassword(pw);
-              // Re-evaluate Alchemy gate after onboarding finishes — a
-              // freshly-onboarded user typically has no key, so the
-              // AlchemySetupModal opens right after the wallet lands.
-              setNeedAlchemy(!hasAlchemyKey());
- // Re-arm the 4-checkbox risk acknowledgment. The initial
- // useState(() => hasWallet() && !lsGetJSON(riskAck)) ran at
- // App-mount when no wallet existed, so it captured `false`
- // and stuck. After onboarding a wallet now exists, but the
- // React state hasn't re-read LS — we have to flip it here.
- // Re-reading LS keeps the existing-user case correct: a
- // returning user with riskAck already saved sees `false`
- // and skips straight to UNLOCK. Only fresh onboards and
- // post-wipe re-onboards land on the RiskAckModal.
-              setNeedRiskAck(!lsGetJSON(LS_KEYS.riskAck));
-            }}
-          />
-        )}
         {/* AlchemySetupModal — REQUIRED in the web build. Without an
             Alchemy key the indexer's cold scan dogpiles public
             mempool.space / blockstream.info mirrors and 429s within
             minutes. Blocks the UI until the user pastes a valid
-            HTTPS URL. */}
-        {!firstRun && needAlchemy && (
+            HTTPS URL. Only fires here AFTER a wallet exists; pre-
+            wallet users browse the lobby without this gate. */}
+        {needAlchemy && (
           <AlchemySetupModal
             onDone={() => {
               setNeedAlchemy(false);
@@ -4498,7 +4504,7 @@ export default function LuckyProtocolApp() {
             }}
           />
         )}
-        {!firstRun && !needAlchemy && needRiskAck && (
+        {!needAlchemy && needRiskAck && (
           <RiskAckModal
             onAck={() => {
               try { lsSetJSON(LS_KEYS.riskAck, { at: Date.now() }); } catch {}
@@ -4506,7 +4512,7 @@ export default function LuckyProtocolApp() {
             }}
           />
         )}
-        {!firstRun && !needAlchemy && !needRiskAck && walletMeta?.address && !sessionPassword && (
+        {!needAlchemy && !needRiskAck && walletMeta?.address && !sessionPassword && (
           <UnlockModal onUnlocked={(pw) => setSessionPassword(pw)} />
         )}
       </div>
@@ -4698,7 +4704,27 @@ export default function LuckyProtocolApp() {
                 }}
               />
             )}
-            {screen === "wallet" && (
+            {screen === "wallet" && firstRun && (
+              <OnboardModal
+                onDone={(pw) => {
+                  setFirstRun(false);
+                  walletSyncCache().then((cache) => {
+                    if (cache) setWalletMeta(cache);
+                  });
+                  if (pw) setSessionPassword(pw);
+                  // Re-evaluate Alchemy gate after onboarding finishes — a
+                  // freshly-onboarded user typically has no key, so the
+                  // AlchemySetupModal opens right after the wallet lands.
+                  setNeedAlchemy(!hasAlchemyKey());
+                  // Re-arm the risk acknowledgment. The initial useState
+                  // ran when no wallet existed, so it captured `false`
+                  // and stuck. After onboarding a wallet now exists, but
+                  // the React state hasn't re-read LS — flip it here.
+                  setNeedRiskAck(!lsGetJSON(LS_KEYS.riskAck));
+                }}
+              />
+            )}
+            {screen === "wallet" && !firstRun && (
               <WalletScreen
                 state={state}
                 walletMeta={walletMeta}
