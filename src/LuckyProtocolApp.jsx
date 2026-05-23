@@ -14236,6 +14236,16 @@ function SystemLockOverlay({ lock, onRetry }) {
 }
 
 function OnboardModal({ onDone, onClose }) {
+  // Tiny fade-in keyframe for the inline card. No slide; the card is
+  // now part of the wallet-tab layout, not a fullscreen overlay, so an
+  // aggressive entrance would feel out of place. Idempotent inject.
+  __injectStyleOnce("__btx_onboard_card_in", `
+    @keyframes btx-card-fade-in {
+      from { transform: translateY(6px); opacity: 0; }
+      to   { transform: translateY(0);   opacity: 1; }
+    }
+  `);
+
   const [step, setStep] = useState(1);
   const [seed, setSeed] = useState([]);
   const [verifyIdx, setVerifyIdx] = useState([]);
@@ -14311,12 +14321,10 @@ function OnboardModal({ onDone, onClose }) {
     4: "SET LOGIN PASSWORD",
   };
 
-  // Allow ESC + click-outside to dismiss — only meaningful when this
-  // modal lives inside the WALLET tab (the casino lobby is now the
-  // landing page, so the user can always retreat). The legacy "blocker"
-  // semantics (modal MUST be completed before anything else) no longer
-  // apply: onClose drops the user back to the dashboard without
-  // committing anything to IDB.
+  // ESC key still dismisses for keyboard users. We dropped the
+  // click-outside handler along with the backdrop — there IS no
+  // backdrop now; clicking elsewhere in the app is just normal
+  // navigation, not a "close" gesture.
   useEffect(() => {
     if (!onClose) return undefined;
     const onKey = (e) => {
@@ -14328,27 +14336,27 @@ function OnboardModal({ onDone, onClose }) {
 
   return (
     <div
-      className="btx-modal-blocker"
-      onClick={(e) => {
-        // Click anywhere outside the inner card to close. The card
-        // catches clicks via stopPropagation below, so this only
-        // fires when the user clicks the dim backdrop.
-        if (onClose && e.target === e.currentTarget) onClose();
-      }}
+      className="btx-modal-card"
       style={{
-        // Drop the casino-interior photo backdrop here. Inside the
-        // WALLET tab this modal sits on top of the rest of the app
-        // (sidebar + topbar still visible behind it), and the photo
-        // backdrop fights with that layout. A plain dim overlay reads
-        // as "modal" without yet another competing surface.
-        background: "rgba(5, 2, 3, 0.78)",
-        backdropFilter: "blur(6px)",
+        // Inline card. NOT a fullscreen modal — no .btx-modal-blocker
+        // wrapper, no fixed positioning, no dim/blur backdrop. The
+        // wallet tab is a deliberate destination; the user reaches it
+        // by clicking WALLET in the sidebar, and they can leave it the
+        // same way. Sidebar + topbar + dashboard behind this card
+        // stay fully interactive.
+        width: "100%",
+        maxWidth: 720,
+        margin: "24px auto",
+        // Override the default centered-modal's 360° gold-glow shadow
+        // with a softer ambient drop-shadow appropriate for a page-
+        // resident card.
+        boxShadow:
+          "0 12px 60px rgba(0, 0, 0, 0.55), " +
+          "inset 0 0 0 1px rgba(212, 162, 58, 0.18)",
+        padding: "40px 48px",
+        animation: "btx-card-fade-in 240ms cubic-bezier(.16,.84,.36,1) both",
       }}
     >
-      <div
-        className="btx-modal-card"
-        onClick={(e) => e.stopPropagation()}
-      >
         <div className="btx-modal-corner btx-modal-corner-tl" />
         <div className="btx-modal-corner btx-modal-corner-tr" />
         <div className="btx-modal-corner btx-modal-corner-bl" />
@@ -14545,8 +14553,11 @@ function OnboardModal({ onDone, onClose }) {
             indicator (top-right). See the `step > 1 && <button>` inside
             the modal header above. */}
 
-      </div>
-
+      {/* Inner card-content wrapper was removed when the modal flattened
+          into an inline card (no .btx-modal-blocker any more), so this
+          slot is left empty. The scoped CSS below still injects the
+          shared rules (.btx-modal-divider, .btx-input, .btx-btn-primary
+          etc.) used elsewhere in the app. */}
       <>{(__injectStyleOnce("__btx_style_4", `
         .btx-modal-blocker {
           position: fixed; inset: 0; z-index: 1000;
