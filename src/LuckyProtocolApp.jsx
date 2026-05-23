@@ -4856,8 +4856,11 @@ export default function LuckyProtocolApp() {
           <SidebarRight
             state={state} setState={setState} screen={screen}
             selectToken={selectToken} goIndex={goIndex}
+            goWallet={() => { setScreen("wallet"); setActiveNav("wallet"); }}
             aiMode={aiMode} setAiMode={setAiMode}
             onChainBets={onChainBets}
+            locked={!walletMeta?.address || !hasAlchemyKey()}
+            onLockedClick={() => setToast({ kind: "warn", msg: LOCKED_HINT })}
           />
 
           {/* Render SettleModal as a child of .hxm-body so its absolute
@@ -8237,7 +8240,7 @@ function RoundIcon() {
 // =============================================================================
 // RIGHT SIDEBAR (Active Token Selector + Wallet Summary + AI Copilot)
 // =============================================================================
-function SidebarRight({ state, setState, screen, selectToken, goIndex, aiMode, setAiMode, onChainBets }) {
+function SidebarRight({ state, setState, screen, selectToken, goIndex, goWallet, aiMode, setAiMode, onChainBets, locked, onLockedClick }) {
  // Right-rail composition:
  // [ALL screens] ACTIVE TOKEN selector
  // [game rooms] MY BETS history (per-tier, mempool-linked) — sandwiched
@@ -8248,13 +8251,29 @@ function SidebarRight({ state, setState, screen, selectToken, goIndex, aiMode, s
  // Per the user's iteration: bring Wallet + AI panels back, but keep My
  // Bets in the rooms tucked between the selector and Wallet so the bet
  // story stays at eye-level.
+ //
+ // `locked` + `onLockedClick` flow through to TokenSelectorPanel and
+ // WalletSummaryPanel so their action buttons (CHANGE TOKEN, VIEW
+ // FULL INDEX, VIEW WALLET) gate behind the same wallet+Alchemy
+ // onboarding requirement as the dashboard MINE buttons.
   const tier = TIERS[screen];
   return (
     <aside className="hxm-sidebar-right hxm-scroll">
-      <TokenSelectorPanel state={state} selectToken={selectToken} goIndex={goIndex} />
+      <TokenSelectorPanel
+        state={state}
+        selectToken={selectToken}
+        goIndex={goIndex}
+        locked={locked}
+        onLockedClick={onLockedClick}
+      />
       {tier && <BetHistoryPanel state={state} tier={tier} variant="sidebar" onChainBets={onChainBets} />}
       <AICopilotPanel state={state} screen={screen} aiMode={aiMode} setAiMode={setAiMode} />
-      <WalletSummaryPanel state={state} />
+      <WalletSummaryPanel
+        state={state}
+        locked={locked}
+        onLockedClick={onLockedClick}
+        goWallet={goWallet}
+      />
     </aside>
   );
 }
@@ -8325,7 +8344,7 @@ function SortChips({ options, value, dir, onChange }) {
   );
 }
 
-function TokenSelectorPanel({ state, selectToken, goIndex }) {
+function TokenSelectorPanel({ state, selectToken, goIndex, locked, onLockedClick }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const active = state.deployedTokens.find((t) => t.ticker === state.wallet.tokenTicker)
@@ -8337,6 +8356,19 @@ function TokenSelectorPanel({ state, selectToken, goIndex }) {
   const handlePick = (ticker) => {
     selectToken(ticker);
     setPickerOpen(false);
+  };
+
+ // Gate the CHANGE TOKEN + VIEW FULL INDEX clicks behind onboarding.
+ // Same LOCKED_HINT toast as the dashboard MINE buttons so the
+ // user gets a consistent "you need a wallet + Alchemy" message
+ // no matter which gated affordance they tap.
+  const handleChangeToken = () => {
+    if (locked) { onLockedClick?.(); return; }
+    setPickerOpen(true);
+  };
+  const handleViewIndex = () => {
+    if (locked) { onLockedClick?.(); return; }
+    goIndex();
   };
 
   return (
@@ -8409,21 +8441,28 @@ function TokenSelectorPanel({ state, selectToken, goIndex }) {
           </div>
         </div>
 
-        {/* Action buttons — same compact treatment */}
+        {/* Action buttons — same compact treatment. Both gate on
+            `locked`: pre-wallet / pre-Alchemy users get the same
+            LOCKED_HINT toast as the dashboard MINE buttons so the
+            failure mode is consistent across the UI. */}
         <button
           className="hxm-btn-cta"
-          onClick={() => setPickerOpen(true)}
+          onClick={handleChangeToken}
+          aria-disabled={locked || undefined}
           style={{
             marginTop: 8, width: "100%", fontSize: 10.5,
             padding: "8px 12px",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            opacity: locked ? 0.45 : 1,
+            cursor: locked ? "not-allowed" : "pointer",
           }}
         >
           <RefreshCw size={10} />
           CHANGE TOKEN
         </button>
         <button
-          onClick={goIndex}
+          onClick={handleViewIndex}
+          aria-disabled={locked || undefined}
           style={{
             marginTop: 5, width: "100%",
             padding: "5px 10px",
@@ -8433,8 +8472,9 @@ function TokenSelectorPanel({ state, selectToken, goIndex }) {
             color: "var(--hxm-text-dim)",
             fontSize: 9.5,
             letterSpacing: "0.16em",
-            cursor: "pointer",
+            cursor: locked ? "not-allowed" : "pointer",
             fontFamily: "inherit",
+            opacity: locked ? 0.45 : 1,
           }}
           className="hxm-bebas"
         >
@@ -8442,7 +8482,7 @@ function TokenSelectorPanel({ state, selectToken, goIndex }) {
         </button>
       </div>
 
-      {pickerOpen && (
+      {pickerOpen && !locked && (
         <TokenPickerModal
           state={state}
           onPick={handlePick}
@@ -8803,8 +8843,12 @@ function TokenPickerModal({ state, onPick, onClose }) {
 // pass — DEPLOY now lives as its own full screen (DeployScreen, line
 // ~15375) which is what the NAV bar's DEPLOY button routes to.
 
-function WalletSummaryPanel({ state }) {
+function WalletSummaryPanel({ state, locked, onLockedClick, goWallet }) {
   const btc = (state.wallet.btc_sats / 1e8).toFixed(8);
+  const handleViewWallet = () => {
+    if (locked) { onLockedClick?.(); return; }
+    goWallet?.();
+  };
   return (
     <div className="hxm-panel">
       <div className="hxm-panel-head">
@@ -8848,7 +8892,16 @@ function WalletSummaryPanel({ state }) {
             </div>
           </div>
         </div>
-        <button className="hxm-btn-cta" style={{ marginTop: 12, width: "100%", fontSize: 12 }}>
+        <button
+          className="hxm-btn-cta"
+          onClick={handleViewWallet}
+          aria-disabled={locked || undefined}
+          style={{
+            marginTop: 12, width: "100%", fontSize: 12,
+            opacity: locked ? 0.45 : 1,
+            cursor: locked ? "not-allowed" : "pointer",
+          }}
+        >
           VIEW WALLET
         </button>
       </div>
@@ -9003,26 +9056,10 @@ function FooterBar({ state, settle, settling, reset }) {
       <span>On-Chain</span>
 
       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-        {/* Social link pair — GitHub for source verification (a wallet
-            user's first instinct should be "show me the code"), X for
-            release announcements. Inline SVG icons so we don't pull
-            new symbols out of lucide-react (its X-branding icon ships
-            as the old Twitter bird in the version we have pinned).
-            rel="noopener noreferrer" prevents window.opener leakage
-            and tab-napping from the destination. */}
-        <a
-          href="https://github.com/luckyprotocol"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hxm-btn"
-          aria-label="LUCKYPROTOCOL on GitHub"
-          title="Source on GitHub"
-          style={{ padding: "6px 8px", textDecoration: "none" }}
-        >
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
-            <path d="M12 .5C5.65.5.5 5.66.5 12.04c0 5.1 3.29 9.42 7.86 10.95.58.11.79-.25.79-.56v-2.02c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.2 1.77 1.2 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11.06 11.06 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.8 1.18 1.82 1.18 3.08 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.15v3.18c0 .31.21.67.79.55C20.21 21.46 23.5 17.14 23.5 12.04 23.5 5.66 18.35.5 12 .5Z" />
-          </svg>
-        </a>
+        {/* Social link — X for release announcements. GitHub icon was
+            removed per user request. rel="noopener noreferrer"
+            prevents window.opener leakage and tab-napping from the
+            destination. */}
         <a
           href="https://x.com/luckyprotocolai"
           target="_blank"
