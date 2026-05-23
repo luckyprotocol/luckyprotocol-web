@@ -49,55 +49,10 @@
         font-family: system-ui, sans-serif;
       }
       #root { display: flex; }
-
-      /* Anti-phishing footer chip. Rendered OUTSIDE the React tree so
-         it never unmounts and React state can't accidentally hide it.
-         Lives bottom-right on every screen — small enough not to crowd
-         the casino UI, persistent enough that returning users train
-         themselves to look for it. A phishing clone running on
-         lucky-protocol.com / luckyprotocol.xyz / etc. CAN copy this
-         text trivially, so it is NOT a tamper-evidence indicator —
-         the prompt "verify URL bar" is what does the work. */
-      #anti-phishing-banner {
-        position: fixed;
-        bottom: 8px;
-        right: 8px;
-        z-index: 99999;
-        background: rgba(15, 8, 6, 0.92);
-        color: #d4af37;
-        border: 1px solid rgba(212, 175, 55, 0.45);
-        padding: 6px 10px;
-        font-size: 10px;
-        line-height: 1.4;
-        border-radius: 6px;
-        font-family: 'JetBrains Mono', ui-monospace, monospace;
-        max-width: 280px;
-        pointer-events: none;
-        user-select: none;
-        backdrop-filter: blur(4px);
-      }
-      #anti-phishing-banner b { color: #ffe589; }
-      @media (max-width: 480px) {
-        #anti-phishing-banner {
-          left: 8px;
-          right: 8px;
-          max-width: none;
-          text-align: center;
-          font-size: 9.5px;
-        }
-      }
     </style>
   </head>
   <body>
     <div id="root"></div>
-    <!-- Anti-phishing banner — see CSS above. Static markup, no JS
-         hooks, so the message survives even if the React bundle fails
-         to load (which would itself be a strong "something's wrong"
-         signal a user should heed). -->
-    <div id="anti-phishing-banner">
-      🔒 Official URL: <b>lucky-protocol.xyz</b><br>
-      Always verify the address bar before entering your password.
-    </div>
     <noscript>
       <div style="padding:40px; max-width:540px; margin:60px auto; color:#e9d4a4;">
         <h1 style="color:#d4af37;">LUCKYPROTOCOL requires JavaScript</h1>

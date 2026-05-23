@@ -1476,7 +1476,43 @@ const _resetPollNowDedupe = () => {
 // for the real indexer to come up.
 let _globalIndexerEverResponded = false;
 
+// Module-level gate. Stays false until React tells us BOTH a wallet
+// exists AND an Alchemy endpoint is configured. While false:
+//   - _pollSyncOnce is a no-op (no chain RPC fires)
+//   - the in-browser indexer never boots (its lazy boot is triggered
+//     from pingGlobalIndexer, which is gated here)
+//   - tx-history polls / fee polls / address syncs are gated separately
+//     by the same React state but converge on this flag for the
+//     "indexer cold-scan" engine.
+// Purpose: a fresh visitor browsing the lobby must NOT drain the public
+// mempool.space / blockstream.info quotas before they've decided to
+// onboard. Real users with Alchemy pay their own quota; the public
+// fallbacks exist for transient Alchemy outages, not for tire-kickers.
+let _syncEnabled = false;
+const _setSyncEnabled = (on) => {
+  const next = !!on;
+  if (next === _syncEnabled) return;
+  _syncEnabled = next;
+  if (next) {
+    // Kick off the poller immediately when we transition off→on so
+    // the first sync happens within ~one render tick of the user
+    // finishing onboarding (instead of waiting up to a full cadence).
+    _startSyncPoller();
+  } else if (_syncTimer) {
+    // Cancel the next scheduled tick — any in-flight tick will exit
+    // via the guard inside _pollSyncOnce below. We DON'T null out
+    // _syncTimer here because _startSyncPoller's own clearTimeout
+    // does that on next start.
+    clearTimeout(_syncTimer);
+    _syncTimer = null;
+  }
+};
+
 const _pollSyncOnce = async () => {
+ // Hard gate: pre-onboarding visitors get zero chain traffic. The
+ // poller may still be ticking if a re-render fires before the timer
+ // is cancelled, but every actual RPC starts here.
+  if (!_syncEnabled) return;
  // 1) Global indexer (if user enabled it) is the authoritative source.
   if (isGlobalIndexerEnabled()) {
     try {
@@ -1670,9 +1706,12 @@ try {
   } catch (_e) { /* chain-web unavailable — non-fatal */ }
 })();
 
-// Boot-time init: kick off the real poller. (Module loads once even
-// under React strict mode; the timer is idempotent via the clear above.)
-_startSyncPoller();
+// NO module-load auto-start. The poller now starts only when React
+// flips _setSyncEnabled(true) from a useEffect that watches walletMeta
+// + hasAlchemyKey. A fresh visitor on the lobby fires zero chain RPCs;
+// only after they finish onboarding (wallet committed + Alchemy URL
+// saved) does the cold scan begin. See _setSyncEnabled above for the
+// transition logic.
 
 // Re-export under the legacy name so callers that say `triggerScanMock()`
 // still work — semantics: force an immediate refresh of real data.
@@ -2515,6 +2554,24 @@ export default function LuckyProtocolApp() {
     return () => { cancelled = true; };
   }, []);
 
+  // Chain-poll gate. We start the module-level _startSyncPoller ONLY
+  // when both a wallet AND an Alchemy endpoint exist. Before that:
+  //   - the lobby is browseable (sidebar+dashboard render with
+  //     placeholder "—" tiles)
+  //   - zero chain RPC fires (no mempool.space / blockstream.info /
+  //     Alchemy hits at all)
+  //   - the in-browser indexer never boots (its lazy boot is triggered
+  //     from pingGlobalIndexer, which lives inside _pollSyncOnce)
+  // Once the user finishes onboarding both halves, this useEffect re-
+  // fires, flips _syncEnabled=true, and the cold scan begins from
+  // activation height. Stops cleanly if the user later wipes the
+  // wallet or clears the Alchemy key from SETTINGS.
+  const alchemyReadyForGate = needAlchemy === false;
+  useEffect(() => {
+    const ready = !!walletMeta?.address && alchemyReadyForGate;
+    _setSyncEnabled(ready);
+  }, [walletMeta?.address, alchemyReadyForGate]);
+
  // Boot-time auto-update probe — disabled in v0.1. See the import
  // comment above for re-enable steps.
  // useEffect(() => {
@@ -2545,7 +2602,13 @@ export default function LuckyProtocolApp() {
  // accuracy doesn't need sub-minute resolution.
   const [addressTxs, setAddressTxs] = useState([]);
   useEffect(() => {
-    if (!walletMeta?.address) return undefined;
+    // Two-condition gate. Without BOTH we don't issue any address-tx
+    // fetch — the public Esplora mirrors (mempool.space / blockstream.info)
+    // would 429 within a few hundred hits if every casual visitor's
+    // browser polled them at 30s cadence, and the user already saw a
+    // "tx history fetch failed: all Esplora hosts unavailable" toast
+    // in production from exactly that scenario.
+    if (!walletMeta?.address || !hasAlchemyKey()) return undefined;
     let cancelled = false;
     const fetchTxs = async () => {
       if (cancelled) return;
@@ -4596,6 +4659,14 @@ export default function LuckyProtocolApp() {
           chainState={chainState}
           network={walletMeta?.network}
           onChainBets={onChainBets}
+          // `scanReady` mirrors the same gate that controls _setSyncEnabled:
+          // both a wallet AND an Alchemy endpoint must exist. Until then,
+          // every tile renders a "—" placeholder. There IS no real chain
+          // data to display yet — the sync poller isn't running, the
+          // indexer isn't booted, the fee feed is dark. Showing stale
+          // zeroes would be misleading; showing the previous user's
+          // numbers would be a privacy leak across browser profiles.
+          scanReady={!!walletMeta?.address && !needAlchemy}
         />
 
         {/* Banner removed — replaced by the full-screen UnlockModal
@@ -7845,10 +7916,35 @@ function VegasBadge() {
 // =============================================================================
 // TOP STATS BAR (6 stats + status)
 // =============================================================================
-function TopStatsBar({ state, chainState, network, onChainBets }) {
+function TopStatsBar({ state, chainState, network, onChainBets, scanReady }) {
   const sync = useSyncStatus();
   const w = state.wallet;
   const btc = (w.btc_sats / 1e8).toFixed(8);
+
+  // Pre-onboarding placeholder bar. We render the same number of tiles
+  // in the same order/labels so the layout doesn't shift the instant
+  // the user finishes onboarding (the tiles just swap "—" for live
+  // values in place). Nothing here references chainState / sync /
+  // network — none of those have meaningful values yet, and accessing
+  // them through optional chaining would still surface "0 sat" /
+  // "no chain sync yet" subtext that's slightly worse than a clean dash.
+  if (!scanReady) {
+    return (
+      <div className="hxm-topbar">
+        <StatTile icon={<Bitcoin size={20} color="#f7a51b" />} label="WALLET BTC"    value="—" sub="set up wallet to populate" />
+        <StatTile icon={<BlockIcon />}                          label="CURRENT BLOCK"  value="—" sub="chain sync paused"           mono />
+        <StatTile icon={<BlockIcon />}                          label="INDEXER SCAN"   value="—" sub="indexer paused"               mono />
+        <StatTile icon={<Zap size={20} color="#f5dc89" />}      label="MIN FEE RATE"   value="—" sub="fee feed paused"              mono />
+        <StatTile icon={<RoundIcon />}                          label="PENDING BETS"   value="—" sub="no wallet yet" />
+        <StatTile
+          icon={<span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", background: "var(--hxm-text-mute)" }} />}
+          label="STATUS"
+          value="IDLE"
+          sub="awaiting onboarding"
+        />
+      </div>
+    );
+  }
  // PENDING bet count = on-chain bets that have been broadcast but
  // haven't settled yet (no outcome populated). `onChainBets` is the
  // shared LS-backed bets log (`luckyprotocol.bets.v1`), refreshed every
