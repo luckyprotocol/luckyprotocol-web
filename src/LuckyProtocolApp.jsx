@@ -4562,11 +4562,18 @@ export default function LuckyProtocolApp() {
       <BtxSharedCss />
 
       {/* ============ LEFT SIDEBAR ============ */}
+      {/* `locked` gates the wallet-requiring NAV items behind the
+          "Generate wallet + Alchemy" onboarding. We test the same two
+          conditions the rest of the app uses to decide whether signing
+          + indexer reads are viable: wallet exists (walletMeta) AND an
+          Alchemy endpoint is configured. */}
       <SidebarLeft
         activeNav={activeNav}
         setActiveNav={setActiveNav}
         setScreen={setScreen}
         onOpenDonate={() => setShowDonate(true)}
+        locked={!walletMeta?.address || !hasAlchemyKey()}
+        setToast={setToast}
       />
       {showDonate && (
         <DonateModal onClose={() => setShowDonate(false)} setToast={setToast} />
@@ -4602,7 +4609,16 @@ export default function LuckyProtocolApp() {
 
         <div className="hxm-body">
           <div className="hxm-center hxm-scroll">
-            {screen === "dashboard" && <Dashboard state={state} goRoom={goRoom} settle={settle} settling={settling} />}
+            {screen === "dashboard" && (
+              <Dashboard
+                state={state}
+                goRoom={goRoom}
+                settle={settle}
+                settling={settling}
+                locked={!walletMeta?.address || !hasAlchemyKey()}
+                onLockedClick={() => setToast({ kind: "warn", msg: LOCKED_HINT })}
+              />
+            )}
             {screen === "index" && (
               <TokenIndex
                 state={state}
@@ -7344,24 +7360,36 @@ function CasinoCss() {
 // =============================================================================
 // LEFT SIDEBAR
 // =============================================================================
+// `requiresUnlock: true` means "this section is gated until the user has
+// a wallet + Alchemy endpoint configured" — clicking it pre-onboarding
+// is a no-op with a tooltip explaining why. Always-available: DASHBOARD
+// (the lobby preview), WALLET (where you onboard), SETTINGS (where you
+// configure Alchemy / network). Everything else needs the wallet because
+// it either signs (DEPLOY, TRANSFERS, MINE), reads per-address state
+// (LEDGER, UTXO, ALMANAC), or queries the indexer past its lazy boot
+// (INDEX).
 const NAV = [
   { key: "dashboard",    label: "DASHBOARD",   icon: LayoutDashboard, screen: "dashboard" },
-  { key: "mining",       label: "MINE",        icon: Layers,          screen: "iron" },
-  { key: "transactions", label: "LEDGER",      icon: FileText,        screen: "transactions" },
-  { key: "almanac",      label: "ALMANAC",     icon: ScanSearch,      screen: "almanac" },
-  { key: "index",        label: "INDEX",       icon: Database,        screen: "index" },
-  { key: "deploy",       label: "DEPLOY",      icon: Rocket,          screen: "deploy" },
+  { key: "mining",       label: "MINE",        icon: Layers,          screen: "iron",         requiresUnlock: true },
+  { key: "transactions", label: "LEDGER",      icon: FileText,        screen: "transactions", requiresUnlock: true },
+  { key: "almanac",      label: "ALMANAC",     icon: ScanSearch,      screen: "almanac",      requiresUnlock: true },
+  { key: "index",        label: "INDEX",       icon: Database,        screen: "index",        requiresUnlock: true },
+  { key: "deploy",       label: "DEPLOY",      icon: Rocket,          screen: "deploy",       requiresUnlock: true },
   { key: "wallet",       label: "WALLET",      icon: Wallet,          screen: "wallet" },
-  { key: "utxo",         label: "UTXO",        icon: Boxes,           screen: "utxo" },
-  { key: "transfers",    label: "TRANSFERS",   icon: ArrowLeftRight,  screen: "transfers" },
+  { key: "utxo",         label: "UTXO",        icon: Boxes,           screen: "utxo",         requiresUnlock: true },
+  { key: "transfers",    label: "TRANSFERS",   icon: ArrowLeftRight,  screen: "transfers",    requiresUnlock: true },
  // BRIDGE — placeholder slot for the cross-chain bridge feature. Lands
  // on a "COMING SOON" splash for now; the screen renders the casino
  // interior backdrop (same image used by OnboardModal's
  // `.btx-modal-blocker::before` layer) so the empty state still feels
  // like part of the app, not a 404.
-  { key: "bridge",       label: "BRIDGE",      icon: Cable,           screen: "bridge" },
+  { key: "bridge",       label: "BRIDGE",      icon: Cable,           screen: "bridge",       requiresUnlock: true },
   { key: "settings",     label: "SETTINGS",    icon: Settings,        screen: "settings" },
 ];
+
+// Single source of truth for the "you need to onboard" message. Used by
+// the sidebar's locked-item tooltip AND the dashboard MINE buttons.
+const LOCKED_HINT = "Generate a wallet and configure your Alchemy node to unlock this section.";
 
 function LocalTimeClock() {
   const [t, setT] = useState(() => new Date());
@@ -7382,8 +7410,16 @@ function LocalTimeClock() {
   );
 }
 
-function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate }) {
+function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked, setToast }) {
   const click = (item) => {
+    // If this item requires the wallet+Alchemy gate and we're locked,
+    // do nothing visible beyond surfacing the standard hint as a toast.
+    // The button is also disabled visually (see below), so this is
+    // belt-and-braces in case a keyboard tab + Enter slips through.
+    if (locked && item.requiresUnlock) {
+      if (setToast) setToast({ kind: "warn", msg: LOCKED_HINT });
+      return;
+    }
     setActiveNav(item.key);
     if (item.screen) setScreen(item.screen);
   };
@@ -7440,8 +7476,27 @@ function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate }) {
       {NAV.map((item) => {
         const Icon = item.icon;
         const active = activeNav === item.key;
+        const isLocked = locked && item.requiresUnlock;
         return (
-          <button key={item.key} className={`hxm-nav-btn ${active ? "is-active" : ""}`} onClick={() => click(item)}>
+          <button
+            key={item.key}
+            className={`hxm-nav-btn ${active ? "is-active" : ""}`}
+            onClick={() => click(item)}
+            // Native browser tooltip on hover. `title` is intentionally
+            // unsophisticated — it pops on any pointing device without
+            // needing JS layout math and respects accessibility
+            // (screen readers announce it). A styled tooltip popover
+            // could come later if we want richer copy or icons.
+            title={isLocked ? LOCKED_HINT : undefined}
+            disabled={isLocked}
+            // Faded look only on locked items. Click handler stays wired
+            // up (it surfaces the toast) but disabled=true + the dim
+            // opacity tell the user "you can hover but not enter".
+            style={isLocked
+              ? { opacity: 0.4, cursor: "not-allowed", filter: "grayscale(40%)" }
+              : undefined}
+            aria-disabled={isLocked || undefined}
+          >
             <Icon size={14} />
             {item.label}
           </button>
@@ -8842,7 +8897,7 @@ function Toast({ kind, msg, onClose }) {
 // =============================================================================
 // DASHBOARD (lobby) — hero + 4 game cards + bottom strip
 // =============================================================================
-function Dashboard({ state, goRoom, settle, settling }) {
+function Dashboard({ state, goRoom, settle, settling, locked, onLockedClick }) {
  // Wrap in .btx-screen so Dashboard inherits the same max-width / margin
  // / min-height bounds as Settings/Wallet/Deploy/Transfer/UTXO. Hero
  // stretches to consume whatever vertical space the GameCard row
@@ -8866,7 +8921,19 @@ function Dashboard({ state, goRoom, settle, settling }) {
         marginTop: 18,
       }}>
         {Object.values(TIERS).map((T) => (
-          <GameCard key={T.key} tier={T} state={state} onPlay={() => goRoom(T.key)} />
+          <GameCard
+            key={T.key}
+            tier={T}
+            state={state}
+            locked={locked}
+            onPlay={() => {
+              if (locked) {
+                if (onLockedClick) onLockedClick();
+                return;
+              }
+              goRoom(T.key);
+            }}
+          />
         ))}
       </div>
     </div>
@@ -9871,7 +9938,7 @@ function DashboardHero() {
   );
 }
 
-function GameCard({ tier, state, onPlay }) {
+function GameCard({ tier, state, onPlay, locked }) {
  // Use the centralized predicate so this count is guaranteed to
  // match the room's chip strip and ALMANAC's tier dropdown.
   const eligibleList = eligibleChipUtxos(state.wallet.utxos, tier);
@@ -9939,23 +10006,43 @@ function GameCard({ tier, state, onPlay }) {
 
       {/* CTA — uniform gold treatment across all tiers */}
       <div style={{ marginTop: "auto" }}>
-        <button className="hxm-btn-cta" onClick={onPlay} style={{
-          width: "100%", marginTop: 14,
-          padding: "12px 16px",
-          borderColor: "var(--hxm-line-2)",
-          color: "var(--hxm-gold-bright)",
-          whiteSpace: "nowrap",
-        }}>
+        <button
+          className="hxm-btn-cta"
+          onClick={onPlay}
+          disabled={locked}
+          title={locked ? LOCKED_HINT : undefined}
+          style={{
+            width: "100%", marginTop: 14,
+            padding: "12px 16px",
+            borderColor: "var(--hxm-line-2)",
+            color: "var(--hxm-gold-bright)",
+            whiteSpace: "nowrap",
+            // Faded look for locked state — matches the sidebar's
+            // disabled treatment so the user sees one consistent
+            // "you need to onboard first" visual language.
+            ...(locked
+              ? { opacity: 0.4, cursor: "not-allowed", filter: "grayscale(40%)" }
+              : null),
+          }}
+        >
           MINE {tier.label}
         </button>
-        {/* "X / Y eligible" makes the relationship explicit when the
-            user has dust UTXOs below the chip threshold (Y > X). */}
-        <div style={{ textAlign: "center", marginTop: 8, fontSize: 10, color: eligible > 0 ? "var(--hxm-green-dim)" : "var(--hxm-red-dim)" }}>
-          {eligible > 0
-            ? (totalConfirmedBtc > eligible
-                ? `${eligible} / ${totalConfirmedBtc} eligible UTXOs`
-                : `${eligible} eligible UTXO${eligible > 1 ? "s" : ""}`)
-            : "no eligible UTXO — fund wallet"}
+        {/* Footer line: pre-wallet shows the onboarding hint; post-wallet
+            shows the standard "X / Y eligible UTXOs" status that drives
+            chip selection. */}
+        <div style={{
+          textAlign: "center", marginTop: 8, fontSize: 10,
+          color: locked
+            ? "var(--hxm-text-mute)"
+            : (eligible > 0 ? "var(--hxm-green-dim)" : "var(--hxm-red-dim)"),
+        }}>
+          {locked
+            ? "set up wallet to play"
+            : eligible > 0
+              ? (totalConfirmedBtc > eligible
+                  ? `${eligible} / ${totalConfirmedBtc} eligible UTXOs`
+                  : `${eligible} eligible UTXO${eligible > 1 ? "s" : ""}`)
+              : "no eligible UTXO — fund wallet"}
         </div>
       </div>
     </div>
