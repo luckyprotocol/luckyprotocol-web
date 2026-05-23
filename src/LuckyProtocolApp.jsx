@@ -1439,20 +1439,16 @@ const _postPollNow = (observedTip) => {
   if (now - _lastNudgeAt < POLL_NOW_MIN_INTERVAL_MS) return;
   _lastNudgedTip = observedTip;
   _lastNudgeAt = now;
-  try {
-    const url = getGlobalIndexerUrl();
-    if (!url) return;
- // Fire-and-forget. Errors are silent on purpose:
- // - sidecar's natural poll loop (running on poll_secs cadence)
- //   catches the tip advance within seconds anyway, so a failed
- //   nudge just falls back to the existing baseline cadence
- // - logging here would spam the console on every transient
- //   sidecar-not-yet-bootstrapped startup window
-    fetch(`${url.replace(/\/$/, "")}/poll-now`, {
-      method: "POST",
-      cache: "no-store",
-    }).catch(() => { /* see comment above */ });
-  } catch (_e) { /* getGlobalIndexerUrl threw → URL not configured yet */ }
+ // Web build: there is no external sidecar to HTTP-nudge. The indexer
+ // lives in this same JS process, so route through the web-aware
+ // hook (`indexer-web/index.js::nudgePoll` via the global_indexer
+ // adapter). On desktop this still does the right thing because the
+ // adapter is a no-op when the user has wired up an external sidecar
+ // URL — the older HTTP-POST path was vestigial after the web port.
+ //
+ // The debounce state above (_lastNudgedTip / _lastNudgeAt) still
+ // protects against rapid duplicate nudges in either build.
+  try { nudgeIndexerPoll(); } catch (_e) { /* indexer not yet booted */ }
 };
 
 // Test-time / wipe-time hook: clear the dedupe state so a freshly-

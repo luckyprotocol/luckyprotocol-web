@@ -11,12 +11,17 @@
     <meta name="application-name" content="LUCKYPROTOCOL" />
     <meta name="apple-mobile-web-app-title" content="LUCKYPROTOCOL" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
     <!-- Wallet-app hygiene: do not let search engines index the user-
-         visible app surface and do not embed in iframes from anywhere. -->
+         visible app surface. X-Frame-Options is intentionally NOT set
+         here as a <meta> — browsers hard-reject it from meta, only
+         honoring the HTTP response header. The real clickjacking
+         defense is `frame-ancestors 'none'` in the CSP shipped via
+         public/_headers, vercel.json, and Caddyfile, plus the HTTP
+         `X-Frame-Options: DENY` response header from the same files. -->
     <meta name="robots" content="noindex, nofollow" />
-    <meta http-equiv="X-Frame-Options" content="DENY" />
 
     <!-- Open Graph / Twitter card — used by Telegram, Twitter, Discord etc.
          when someone pastes the URL. The icon doubles as the share image
