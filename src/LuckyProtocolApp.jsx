@@ -4822,31 +4822,14 @@ export default function LuckyProtocolApp() {
         />
       )}
 
-      {firstRun && (
-        <OnboardModal
-          onDone={(pw) => {
-            setFirstRun(false);
-            setWalletMeta(lsGetJSON(LS_KEYS.wallet));
- // Auto-unlock the session: persist the password the user just
- // committed so every subsequent on-chain op has it without
- // ever asking again. Combined with the localStorage-backed
- // setSessionPassword, this also survives an app restart.
-            if (pw) setSessionPassword(pw);
- // Hand off straight to the mandatory Alchemy step. We don't
- // toast "welcome" here yet — main UI is still gated until the
- // user pastes a valid Alchemy URL.
-            setNeedAlchemy(!hasAlchemyKey());
- // Re-evaluate the 4-checkbox risk acknowledgment gate. See the
- // matching block in the first-render branch above for full
- // rationale: needRiskAck's useState initializer ran when no
- // wallet existed, so it captured false; we re-read LS here so a
- // fresh onboard or post-wipe re-onboard correctly triggers the
- // RiskAckModal, while a returning user with riskAck already in
- // LS sees the gate stay false and skips to UNLOCK.
-            setNeedRiskAck(!lsGetJSON(LS_KEYS.riskAck));
-          }}
-        />
-      )}
+      {/* OnboardModal was previously rendered here unconditionally
+          whenever firstRun was true, which re-introduced the landing-
+          page block we tried to remove from the boot gate above.
+          The wallet-creation flow now lives ONLY inside the WALLET
+          tab (rendered at screen === "wallet" && firstRun in the
+          screen-router block earlier in this file), so a fresh
+          visitor sees the casino lobby on landing and onboarding
+          happens only after they deliberately click WALLET. */}
 
       {/* AlchemySetupModal (post-unlock variant) — covers the case
           where the user is past onboarding + unlock but hasn't yet
