@@ -7698,6 +7698,67 @@ function CasinoCss() {
           grid-template-columns: repeat(2, 1fr) !important;
         }
 
+        /* ----- PHASE 3: per-screen polish ----- */
+
+        /* Screen headers (.btx-screen-head) typically have a title
+           on the left and ACTIONS on the right (RESCAN, COPY ADDR,
+           NEW DEPLOY). At narrow widths the two halves crowd each
+           other and the right-side buttons wrap ugly. Stack so the
+           title gets its own row and actions get theirs. */
+        .btx-screen-head {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 10px;
+        }
+        .btx-screen-head h2 { font-size: 22px !important; line-height: 1.15 !important; }
+
+        /* Tighten panel + screen paddings — desktop values are too
+           airy on a narrow viewport. */
+        .btx-screen { padding-bottom: 16px; }
+        .btx-panel { padding: 12px 14px; }
+        .hxm-panel-body { padding: 12px; }
+        .hxm-panel-head { padding: 8px 12px; }
+
+        /* The single HTML table in the codebase (RECENT ROUNDS panel)
+           can be wider than 375px. Wrap-by-CSS: let the table stay
+           at its natural author-set width and the panel-body scrolls
+           horizontally if needed, so row cells stay readable rather
+           than crushed into unreadable narrow columns. */
+        .hxm-panel-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .hxm-panel-body table { min-width: 460px; }
+
+        /* Roulette wheel — .roulette-wrap is 540x540 hardcoded,
+           overflows a 375px viewport. transform: scale keeps the
+           inner pixel math intact (the wheel + ball physics still
+           rotate at the correct angles) but shrinks the rendered
+           footprint. transform-origin: top-center anchors the
+           scale so the wheel doesn't drift sideways. margin-bottom
+           negative because scale doesn't shrink the layout box —
+           it leaves dead space the unscaled element would have
+           occupied; we claw that back. */
+        .roulette-wrap {
+          transform: scale(0.62);
+          transform-origin: top center;
+          margin-bottom: -200px;
+        }
+
+        /* Game-room center pane: if anything still overflows (e.g.
+           a wide control bar inside a room), let the user pan
+           horizontally inside the room rather than breaking the
+           whole page layout. */
+        .hxm-center { overflow-x: auto; }
+
+        /* Touch-target floor: 36px min-height on the common button
+           classes so a finger has a sane place to land. Desktop
+           buttons keep their own smaller heights (no override). */
+        .btx-btn-primary,
+        .btx-btn-ghost,
+        .btx-btn-danger,
+        .btx-btn-back,
+        .hxm-btn-cta {
+          min-height: 36px;
+        }
+
         /* Body grows naturally with its content; the outer page
            scrolls. flex:1 + min-height:0 (the desktop pattern,
            pinned to viewport) is dropped on mobile — it was causing
