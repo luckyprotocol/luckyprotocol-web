@@ -6345,14 +6345,17 @@ function CasinoCss() {
         width: 0; height: 0;
         z-index: 5;
         transform-origin: center center;
-        /* easeOutCubic instead of the wheel's easeOutQuart — gentler
-           launch slope. User feedback: ball started too fast. Quart's
-           initial control point (0.165, 0.84) ramps fast; Cubic's
-           (0.215, 0.61) ramps ~30% slower at the start, so the
-           visible launch speed feels smoother. Still ease-out
-           (decelerates), still 6s duration, so it stays in lockstep
-           with the wheel — just opens with less of a "jerk". */
-        transition: transform 6s cubic-bezier(0.215, 0.61, 0.355, 1);
+        /* easeOutSine — the gentlest standard ease-out. User asked
+           "再慢一点" so we drop another curve tier:
+             Quart   (0.165, 0.84, 0.44, 1)   — original, too sharp
+             Cubic   (0.215, 0.61, 0.355, 1)  — previous attempt
+             Sine    (0.39, 0.575, 0.565, 1)  — current, most gentle
+           Sine's launch is the closest to linear among the
+           standard ease-outs — peak speed at start ≈ 1.57x average,
+           vs Cubic ~2.0x, Quart ~2.5x. Combined with the rotation
+           reduction (8 -> 5), the visible launch is now ~3x slower
+           than the original 12-rotation Quart setup. */
+        transition: transform 6s cubic-bezier(0.39, 0.575, 0.565, 1);
       }
  /* Polished steel ball — three resting positions driven by phase:
            - on the OUTER TRACK at translateY(-198px) while spinning
@@ -13549,15 +13552,12 @@ function BronzeRoom({ state, submitMine, settle, settling, lastResult, goRoom, g
       if (delta > 0) delta -= 360;
       return prev + delta - 360 * 8;
     });
- // Ball orbit reduced from 12 rotations -> 8 (33% slower average
- // speed) per user feedback that "球滚的太快了一开始" — the
- // ball's launch speed was visually too aggressive. Direction
- // stays positive (opposite to wheel's negative rotation),
- // preserving the "ball going one way around the rim while
- // wheel spins the other" visual. 8 rotations / 6s = 480 deg/sec
- // avg vs 720 deg/sec before; peak speed at start (easeOutQuart)
- // drops from ~1440 -> ~960.
-    setBallAngle((prev) => prev + 360 * 8);
+ // Ball orbit further reduced 8 -> 5 rotations (user asked for
+ // even slower). 5 rotations / 6s = 300 deg/sec avg vs 720 deg/sec
+ // in the original. Direction stays positive (opposite to wheel)
+ // so the "ball one way, wheel the other" visual is preserved
+ // even at this slower pace.
+    setBallAngle((prev) => prev + 360 * 5);
     sfxLever();
     // Tick / drop / settle timings scaled to the new 6s wheel
     // duration (was 7s) so audio + state transitions stay in sync
