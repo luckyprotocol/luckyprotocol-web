@@ -6203,11 +6203,20 @@ function CasinoCss() {
         margin: 0 auto;
         filter: drop-shadow(0 0 28px rgba(212,162,58,0.18));
       }
- /* fast-then-slow: rocket-decay deceleration */
+ /* Smooth ease-out (easeOutQuart) — replaces the previous rocket-
+        decay curve (0.02, 0.95, 0.2, 1), which was front-loaded so
+        aggressively that the wheel finished ~75% of its rotation in
+        the first 0.7 seconds and then crawled for 6+ seconds. Users
+        reported the result felt "stuck after the burst" — visually
+        the wheel appeared frozen for most of the spin. The new
+        (0.165, 0.84, 0.44, 1) curve keeps the energetic launch but
+        spreads the deceleration evenly across the duration, so the
+        wheel is always visibly turning. Duration also tightened
+        from 7s → 6s for snappier round flow. */
       .roulette-wheel {
         position: absolute; inset: 0;
         width: 100%; height: 100%;
-        transition: transform 7s cubic-bezier(0.02, 0.95, 0.2, 1);
+        transition: transform 6s cubic-bezier(0.165, 0.84, 0.44, 1);
         transform-origin: 50% 50%;
       }
  /*
@@ -6251,7 +6260,9 @@ function CasinoCss() {
         background-size: 100% 100%;
         background-repeat: no-repeat;
         clip-path: circle(48% at 50% 50%);
-        transition: transform 7s cubic-bezier(0.02, 0.95, 0.2, 1);
+        /* Same easeOutQuart curve as .roulette-wheel above — see
+           that rule's comment for why the rocket-decay was replaced. */
+        transition: transform 6s cubic-bezier(0.165, 0.84, 0.44, 1);
         transform-origin: 50% 50%;
       }
       .roulette-center {
@@ -6334,7 +6345,10 @@ function CasinoCss() {
         width: 0; height: 0;
         z-index: 5;
         transform-origin: center center;
-        transition: transform 7s cubic-bezier(0.04, 0.94, 0.22, 1);
+        /* Same easeOutQuart curve + 6s duration as the wheel —
+           the ball orbit and wheel rotation share timing so they
+           visually decelerate in lockstep. */
+        transition: transform 6s cubic-bezier(0.165, 0.84, 0.44, 1);
       }
  /* Polished steel ball — three resting positions driven by phase:
            - on the OUTER TRACK at translateY(-198px) while spinning
@@ -6370,12 +6384,14 @@ function CasinoCss() {
         transition: transform 0.45s cubic-bezier(0.55, 0.08, 0.4, 1);
       }
       .roulette-ball-radial.spinning {
- /* During the spin: ride the outer rail for ~85% of the duration
+ /* During the spin: ride the outer rail for ~78% of the duration
            (matches the wheel's deceleration profile), then drop through
            the red label ring into the inner gold pocket. Final keyframe
            matches the --ball-rest pocket position so the inline-style
-           takeover after the animation ends is seamless (no snap). */
-        animation: ballSpinAndDrop 7.6s ease-in forwards;
+           takeover after the animation ends is seamless (no snap).
+           6.4s = 6s wheel transition + 0.4s settle margin so the ball
+           lands AFTER the wheel has visually committed to its slot. */
+        animation: ballSpinAndDrop 6.4s ease-in forwards;
       }
       @keyframes ballSpinAndDrop {
  /* Outer rail — ball is just inside the inner gold rim, riding
@@ -13533,12 +13549,15 @@ function BronzeRoom({ state, submitMine, settle, settling, lastResult, goRoom, g
  // by remounting the ball via the spinNonce key (set in startSpin).
     setBallAngle((prev) => prev + 360 * 12);
     sfxLever();
-    const cancelTicks = scheduleRouletteTicks(6800, 32);
-    const dropSfxT = setTimeout(sfxReelStop, 4500);
+    // Tick / drop / settle timings scaled to the new 6s wheel
+    // duration (was 7s) so audio + state transitions stay in sync
+    // with the visible deceleration. Scaling factor ~0.85.
+    const cancelTicks = scheduleRouletteTicks(5800, 28);
+    const dropSfxT = setTimeout(sfxReelStop, 3900);
     const settleT = setTimeout(() => {
       setRolledPick(pick);
       setPhase("rolled");
-    }, 7700);
+    }, 6500);
     return () => {
       clearTimeout(dropSfxT); clearTimeout(settleT);
       cancelTicks();
