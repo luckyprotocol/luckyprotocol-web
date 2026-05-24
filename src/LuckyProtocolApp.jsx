@@ -10722,15 +10722,17 @@ function DashboardHero() {
       boxShadow: "0 8px 30px -8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(212,162,58,0.18)",
       lineHeight: 0,
       width: "100%",
-      // 2.8:1 (squatter than the source's native 2.5:1) so the dark
-      // strip at the bottom of the banner image — the empty black
-      // below the "POWERFUL MINING ENGINE / SECURE / STATS / EASY
-      // TO USE" feature row — gets cropped off. Anchored at the top
-      // via objectPosition so the crop happens at the bottom only;
-      // the slot machine + LUCKY PROTOCOL wordmark + feature row
-      // all stay visible. Also reduces the banner's vertical
-      // footprint by ~10%, moving the game cards naturally up.
-      aspectRatio: "2.8 / 1",
+      // 3.2:1 (significantly squatter than the source's native
+      // 2.5:1) crops the bottom 22% of the image. That removes
+      // both the dark empty strip AND the "POWERFUL MINING ENGINE
+      // / SECURE & RELIABLE / REAL-TIME STATS / EASY TO USE"
+      // feature callout row entirely — matches the desktop crop
+      // the user pointed to as the reference. What stays: LUCKY
+      // PROTOCOL wordmark + slot-machine 777 + chips/cards/cherries
+      // /dice/PROOF OF LUCK sign. The shorter banner also pulls
+      // the game card row up so the dashboard packs tighter on
+      // landscape phones.
+      aspectRatio: "3.2 / 1",
     }}>
       <img
         src={BRAND_BANNER_SRC}
