@@ -6345,10 +6345,14 @@ function CasinoCss() {
         width: 0; height: 0;
         z-index: 5;
         transform-origin: center center;
-        /* Same easeOutQuart curve + 6s duration as the wheel —
-           the ball orbit and wheel rotation share timing so they
-           visually decelerate in lockstep. */
-        transition: transform 6s cubic-bezier(0.165, 0.84, 0.44, 1);
+        /* easeOutCubic instead of the wheel's easeOutQuart — gentler
+           launch slope. User feedback: ball started too fast. Quart's
+           initial control point (0.165, 0.84) ramps fast; Cubic's
+           (0.215, 0.61) ramps ~30% slower at the start, so the
+           visible launch speed feels smoother. Still ease-out
+           (decelerates), still 6s duration, so it stays in lockstep
+           with the wheel — just opens with less of a "jerk". */
+        transition: transform 6s cubic-bezier(0.215, 0.61, 0.355, 1);
       }
  /* Polished steel ball — three resting positions driven by phase:
            - on the OUTER TRACK at translateY(-198px) while spinning
@@ -13545,9 +13549,15 @@ function BronzeRoom({ state, submitMine, settle, settling, lastResult, goRoom, g
       if (delta > 0) delta -= 360;
       return prev + delta - 360 * 8;
     });
- // Ball motion is now CSS-driven via @keyframes ballSpinAndDrop, fired
- // by remounting the ball via the spinNonce key (set in startSpin).
-    setBallAngle((prev) => prev + 360 * 12);
+ // Ball orbit reduced from 12 rotations -> 8 (33% slower average
+ // speed) per user feedback that "球滚的太快了一开始" — the
+ // ball's launch speed was visually too aggressive. Direction
+ // stays positive (opposite to wheel's negative rotation),
+ // preserving the "ball going one way around the rim while
+ // wheel spins the other" visual. 8 rotations / 6s = 480 deg/sec
+ // avg vs 720 deg/sec before; peak speed at start (easeOutQuart)
+ // drops from ~1440 -> ~960.
+    setBallAngle((prev) => prev + 360 * 8);
     sfxLever();
     // Tick / drop / settle timings scaled to the new 6s wheel
     // duration (was 7s) so audio + state transitions stay in sync
