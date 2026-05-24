@@ -38,6 +38,7 @@ import {
   fetchTxOutspends,
   fetchTxFull,
   extractLuckyprotocolPayload,
+  hasEsploraAlchemyKey,
 } from "../chain-web/esplora.js";
 import { parsePayload } from "./protocol.js";
 import { applyTx } from "./apply.js";
@@ -49,10 +50,13 @@ import { touchProgress, pushError } from "./state.js";
 // one). 64 rounds is comfortable headroom.
 const MAX_ROUNDS = 64;
 
-// Per-call spacing — same SUSTAINED_REQS_PER_SEC=4 budget the scanner
-// uses. Keeps us under public Esplora 429 limits while still walking
-// the chain in well under a minute for typical wallets.
-const SPACING_MS = 250;
+// Per-call spacing — adaptive based on whether Alchemy is configured
+// (matches scanner.js + fast_bootstrap.js):
+//   ALCHEMY KEY SET → 50ms = 20 req/sec
+//   NO ALCHEMY KEY  → 250ms = 4 req/sec (public-mirror safety default)
+function spacingMs() {
+  return hasEsploraAlchemyKey() ? 50 : 250;
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -165,7 +169,7 @@ export async function followTokenSpends(state, signal) {
       let outspends;
       try {
         outspends = await fetchTxOutspends(txid);
-        await sleep(SPACING_MS);
+        await sleep(spacingMs());
       } catch (e) {
         pushError(state, {
           kind: "network",
@@ -193,7 +197,7 @@ export async function followTokenSpends(state, signal) {
       let tx;
       try {
         tx = await fetchTxFull(outspend.txid);
-        await sleep(SPACING_MS);
+        await sleep(spacingMs());
       } catch (e) {
         pushError(state, {
           kind: "network",

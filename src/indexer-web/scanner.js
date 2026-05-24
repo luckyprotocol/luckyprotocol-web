@@ -39,6 +39,7 @@ import {
   fetchBlocksMeta,
   fetchBlockRaw,
   fetchTxFull,
+  hasEsploraAlchemyKey,
 } from "../chain-web/esplora.js";
 import { parsePayload, LCKPROTOCOL_V1_HEIGHT } from "./protocol.js";
 import { applyTx } from "./apply.js";
@@ -61,14 +62,34 @@ import {
 // even bursty retries can't exceed the providers' ceiling.
 const CONCURRENT_FETCHES = 4;
 
-// Sustained ceiling for indexer-originated HTTP calls. mempool.space's
-// per-IP soft limit is ~10 req/sec; we share with the React layer's
-// tip/syncAddress polls, so 4 req/sec for the indexer leaves headroom.
-const SUSTAINED_REQS_PER_SEC = 4;
+// Sustained ceiling for indexer-originated HTTP calls — adaptive
+// based on which endpoint backs the requests:
+//
+//   ALCHEMY KEY SET → 20 req/sec
+//     Alchemy's Bitcoin endpoint sustains 25-30 req/sec on the
+//     free tier; 20 leaves headroom for the React layer's tip /
+//     syncAddress polls + concurrent UI fetches.
+//
+//   NO ALCHEMY KEY  → 4 req/sec
+//     mempool.space's per-IP soft limit is ~10 req/sec shared with
+//     the React layer; 4 keeps the indexer well below the 429
+//     ceiling. This is the safety default — code paths that
+//     bypass the Alchemy onboarding gate (which is mandatory per
+//     Phase 5v) still get a working but slow scan.
+//
+// Computed per-call rather than module-load so a user who pastes
+// their Alchemy key mid-scan immediately picks up the faster
+// cadence on the next gated HTTP issuance.
+function sustainedReqsPerSec() {
+  return hasEsploraAlchemyKey() ? 20 : 4;
+}
 
 // Token-bucket-style minimum spacing between any two HTTP issuances.
-// Computed from SUSTAINED_REQS_PER_SEC.
-const MIN_REQ_SPACING_MS = Math.ceil(1000 / SUSTAINED_REQS_PER_SEC);
+// Recomputed inside _rateGate so the adaptive cadence above takes
+// effect immediately when Alchemy is enabled/disabled.
+function minReqSpacingMs() {
+  return Math.ceil(1000 / sustainedReqsPerSec());
+}
 
 // Last HTTP issuance timestamp (ms). All scanner HTTP calls funnel
 // through `_rateGate()` which waits until at least
@@ -94,7 +115,7 @@ async function _rateGate() {
   try {
     await prev;
     const now = Date.now();
-    const wait = Math.max(0, _lastReqAt + MIN_REQ_SPACING_MS - now);
+    const wait = Math.max(0, _lastReqAt + minReqSpacingMs() - now);
     if (wait > 0) await sleep(wait);
     _lastReqAt = Date.now();
   } finally {

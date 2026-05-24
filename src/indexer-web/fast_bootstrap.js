@@ -29,23 +29,46 @@
 //   - Reorgs deeper than the bootstrap-applied range. Same caveat as
 //     the rest of the indexer.
 
-import { fetchAddressTxsChain, extractLuckyprotocolPayload } from "../chain-web/esplora.js";
+import { fetchAddressTxsChain, extractLuckyprotocolPayload, hasEsploraAlchemyKey } from "../chain-web/esplora.js";
 import { parsePayload, LCKPROTOCOL_V1_HEIGHT } from "./protocol.js";
 import { applyTx, PROJECT_FEE_ADDRESS } from "./apply.js";
 import { touchProgress, pushError } from "./state.js";
 
 // Hard cap on paging — protects against infinite loops if Esplora
-// returns a malformed last_seen_txid response. 1000 pages × 25 txs =
-// 25,000 DEPLOY+MINE events, which is many years of full-throttle
-// protocol activity.
-const MAX_PAGES = 1000;
+// returns a malformed last_seen_txid response. 100,000 pages ×
+// 25 txs = 2,500,000 DEPLOY+MINE events. That's enough buffer for
+// a wildly successful protocol generation (was previously 1000
+// pages = 25k txs, which would silently truncate at protocol
+// activity beyond ~6 months of heavy use). At the Alchemy
+// 20 req/sec rate the worst-case full scan is ~83 min; in
+// practice the snapshot path (loaded from IndexedDB on returning
+// visits) means only first-ever cold starts pay the time.
+const MAX_PAGES = 100_000;
 
-// Minimum spacing between page fetches. Same SUSTAINED_REQS_PER_SEC=4
-// budget as the scanner; fast bootstrap is 1 HTTP per page so this
-// caps it at ~4 pages/sec — fast enough that even a 1000-page wallet
-// finishes in <5 minutes, slow enough that we don't trip the public
-// Esplora 429 ceiling.
-const PAGE_SPACING_MS = 250;
+// Page-fetch spacing — adaptive based on which endpoint backs the
+// requests:
+//
+//   ALCHEMY KEY SET → 50ms = 20 req/sec
+//     Alchemy's Bitcoin endpoint sustains 25-30 req/sec on the
+//     free tier; 20 leaves comfortable headroom against any short
+//     burst from parallel App-level work (TopStatsBar + WalletScreen
+//     concurrent calls).
+//
+//   NO ALCHEMY KEY  → 250ms = 4 req/sec
+//     mempool.space + blockstream.info public mirrors 429 above
+//     ~5 req/sec sustained. 4 was the old global value before the
+//     Alchemy split — keeps the bootstrap "slow but safe" on
+//     pre-onboarding users (technically Alchemy is mandatory now
+//     per Phase 5v, but the defensive default protects against
+//     code paths that bypass the gate).
+//
+// Computed per-call rather than at module-load time so a user who
+// pastes their Alchemy key mid-bootstrap (rare but possible —
+// Settings page allows re-entry) immediately picks up the faster
+// cadence on the next page.
+function pageSpacingMs() {
+  return hasEsploraAlchemyKey() ? 50 : 250;
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -162,7 +185,7 @@ export async function fastBootstrap(state, signal) {
     if (foundPreActivation || txs.length < 25) break;
     lastSeenTxid = txs[txs.length - 1].txid;
     // Be polite to public Esplora — 4 pages/sec ceiling.
-    await sleep(PAGE_SPACING_MS);
+    await sleep(pageSpacingMs());
   }
 
   // eslint-disable-next-line no-console

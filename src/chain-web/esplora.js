@@ -39,6 +39,13 @@ let _alchemyKeyCache = null;
 export function setEsploraAlchemyKey(key) {
   _alchemyKeyCache = (key && String(key).trim()) || null;
 }
+// Synchronous "is Alchemy hot?" probe — used by the indexer's fast
+// bootstrap to decide its page-spacing budget (Alchemy 20 req/sec
+// vs public-mirror 4 req/sec). Module-local sync read so the
+// hot-path rate-gate code doesn't have to await anything.
+export function hasEsploraAlchemyKey() {
+  return _alchemyKeyCache != null;
+}
 function _alchemyBase() {
   return _alchemyKeyCache
     ? `https://bitcoin-mainnet.g.alchemy.com/v2/${_alchemyKeyCache}`
