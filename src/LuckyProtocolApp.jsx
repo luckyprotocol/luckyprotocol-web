@@ -15417,6 +15417,13 @@ function OnboardModal({ onDone, onClose }) {
               alignItems: "center",
               gap: 10,
             }}>
+              {/* Both CTAs use identical gold-primary styling per user
+                  feedback — visual parity says GENERATE and IMPORT are
+                  equally valid entry points (no implicit "this is the
+                  default" hierarchy). The "~1 second · runs entirely
+                  in this browser" helper line was removed at the
+                  same time since it only described the generate path
+                  and didn't fit the import flow. */}
               <button
                 className="btx-btn-primary"
                 onClick={generate}
@@ -15431,27 +15438,18 @@ function OnboardModal({ onDone, onClose }) {
                 {busy ? "GENERATING..." : "GENERATE NEW WALLET"}
               </button>
               <button
-                className="btx-btn-ghost"
+                className="btx-btn-primary"
                 onClick={() => { setMode("import"); setImportText(""); setImportMsg(""); }}
                 disabled={busy}
                 style={{
                   width: "100%",
-                  padding: "12px 28px",
-                  fontSize: 13,
-                  letterSpacing: "0.2em",
+                  padding: "15px 28px",
+                  fontSize: 15,
+                  letterSpacing: "0.22em",
                 }}
               >
                 IMPORT EXISTING WALLET
               </button>
-              <p style={{
-                fontSize: 10.5,
-                color: "var(--hxm-text-mute)",
-                margin: 0,
-                letterSpacing: "0.08em",
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                ~1 second · runs entirely in this browser
-              </p>
             </div>
           </>
         )}
