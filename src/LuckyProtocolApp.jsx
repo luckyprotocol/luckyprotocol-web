@@ -7558,6 +7558,11 @@ function CasinoCss() {
       .hxm-mobile-nav-toggle { display: none; }
       .hxm-mobile-nav-backdrop { display: none; }
 
+      /* Dashboard room grid — 4 GameCards (IRON/BRONZE/SILVER/GOLD).
+         Desktop default 4 cols is set inline (kept there so the
+         desktop layout has zero specificity surprises); mobile
+         overrides below stack to 2 cols then 1. */
+
       /* ==========================================================
        * MOBILE ADAPTATION — PHASE 1 (CSS-only, zero JSX changes)
        *
@@ -7685,6 +7690,14 @@ function CasinoCss() {
            + 8px left offset + 8px gap = 54px clearance. */
         .hxm-topbar { padding-left: 54px; }
 
+        /* Dashboard MINE-room grid: 4 GameCards in 1 row at desktop
+           squeezes to ~80px each on mobile — unusable. Stack to 2
+           cols at tablet/large-phone widths. !important overrides
+           the inline grid-template-columns set in Dashboard JSX. */
+        .hxm-room-grid {
+          grid-template-columns: repeat(2, 1fr) !important;
+        }
+
         /* Body becomes column too — center on top, right sidebar
            below as a stacked section. Both grow naturally with
            their content; the outer page scrolls. */
@@ -7757,6 +7770,14 @@ function CasinoCss() {
            touching the JSX. */
         [style*="calc(100vh - 110px)"] {
           min-height: calc(100dvh - 140px) !important;
+        }
+
+        /* Phone-narrow: stack the 4 GameCards into a single column
+           so each card uses the full viewport width. At 375px (iPhone
+           SE) the 2-col layout was still cramping ticker + balance
+           labels. */
+        .hxm-room-grid {
+          grid-template-columns: 1fr !important;
         }
       }
     `), null)}</>
@@ -9437,7 +9458,7 @@ function Dashboard({ state, goRoom, settle, settling, locked, onLockedClick }) {
     }}>
       <DashboardHero />
 
-      <div style={{
+      <div className="hxm-room-grid" style={{
         display: "grid",
         gridTemplateColumns: "repeat(4, 1fr)",
         gap: 14,
