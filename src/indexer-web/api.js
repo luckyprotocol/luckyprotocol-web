@@ -133,6 +133,51 @@ export function fetchBets(address) {
 }
 
 /**
+ * Authoritative ON-CHAIN view of which tickers are deployed.
+ *
+ * Returns a Map<ticker, { supply, minted, deployBlock, deployer }>
+ * built directly from the indexer's s.tokens registry (populated by
+ * applyTx as it walks every DEPLOY/MINE/SEND in chain history).
+ *
+ * Why this exists separately from fetchTokensPaged: the LEDGER +
+ * win-credit code paths only need a quick "is this ticker on the
+ * chain, and what's its supply/minted cap?" lookup. They don't
+ * want pagination, sorting, or the holders-count walk (which is
+ * O(|utxoBalances|) per call).
+ *
+ * Returns an empty Map when the indexer isn't ready yet — callers
+ * should fall back to the local deployedTokens cache in that case
+ * (e.g. during the boot window before fast-bootstrap completes).
+ *
+ * Use this anywhere you'd otherwise check `state.deployedTokens`:
+ *   - LEDGER's `activeTickers` predicate (was reading local cache,
+ *     marked perfectly-valid MINEs as "INVALID" when the local
+ *     status didn't say "active" — fixed in TransactionsScreen).
+ *   - syntheticTx outcome loop's `knownTickers` set (was reading
+ *     local cache, refused to credit valid WINs when the local
+ *     registry hadn't synced the DEPLOY's status yet — fixed in
+ *     App.jsx's _refreshOnChainBets loop).
+ *
+ * The desktop indexer's HTTP equivalent would be a hypothetical
+ * `GET /tokens/registry` — not currently exposed because the only
+ * caller (web build) uses this in-process Map directly.
+ */
+export function fetchIndexedTokenRegistry() {
+  if (!isReady()) return new Map();
+  const s = getState();
+  const out = new Map();
+  for (const [ticker, reg] of s.tokens) {
+    out.set(ticker, {
+      supply: Number(reg.supply),
+      minted: Number(reg.minted),
+      deployBlock: reg.deploy_block,
+      deployer: reg.deployer,
+    });
+  }
+  return out;
+}
+
+/**
  * GET /transfers/:address equivalent. Currently sender-only filter
  * (matches desktop). A future enhancement could include recipient-
  * side transfers by resolving to_out_idx → vout_address at apply time

@@ -113,6 +113,14 @@ import {
   LCKPROTOCOL_START_HEIGHT,
   isProtocolHeightValid,
 } from "./protocol/indexer.js";
+// On-chain token-registry view from the local indexer (separate
+// from the `state.deployedTokens` local cache which only tracks
+// THIS wallet's own DEPLOY broadcasts). Used by:
+//   - LEDGER's activeTickers predicate
+//   - syntheticTx outcome loop's knownTickers
+// so a MINE for a chain-deployed ticker doesn't get marked INVALID
+// just because the local cache hasn't synced the DEPLOY's status.
+import { fetchIndexedTokenRegistry } from "./indexer-web/api.js";
 import {
   getGlobalIndexerUrl,
   isGlobalIndexerEnabled,
@@ -4001,10 +4009,28 @@ export default function LuckyProtocolApp() {
  // 2. Clamp credit so `minted + reward <= supply`. The local
  // indexer would otherwise let a hot streak push balance past
  // the protocol-fixed 21M cap.
+      // Source of truth for "is this ticker deployed on the chain?" —
+      // the on-chain indexer's registry takes precedence over the
+      // local deployedTokens cache. User reported a real bug where
+      // a perfectly-valid MINE for a LIVE on-chain ticker was being
+      // marked INVALID + given 0 credit because the local cache had
+      // the ticker as "pending" (or missing entirely). The indexer's
+      // s.tokens map has every DEPLOY it has seen on-chain — that's
+      // the right authority here. Fall back to the local cache when
+      // the indexer isn't ready yet (boot window before
+      // fast-bootstrap completes), since the alternative (treating
+      // every ticker as unknown) would refuse credit on EVERY bet.
+      const indexerReg = fetchIndexedTokenRegistry();
       const dt = deployedTokensRef.current || [];
-      const knownTickers = new Set(dt.map((t) => t.ticker));
-      const mintedByTicker = new Map(dt.map((t) => [t.ticker, Number(t.minted ?? 0)]));
-      const supplyByTicker = new Map(dt.map((t) => [t.ticker, Number(t.supply ?? 0)]));
+      const knownTickers = indexerReg.size > 0
+        ? new Set(indexerReg.keys())
+        : new Set(dt.map((t) => t.ticker));
+      const mintedByTicker = indexerReg.size > 0
+        ? new Map(Array.from(indexerReg, ([k, v]) => [k, v.minted]))
+        : new Map(dt.map((t) => [t.ticker, Number(t.minted ?? 0)]));
+      const supplyByTicker = indexerReg.size > 0
+        ? new Map(Array.from(indexerReg, ([k, v]) => [k, v.supply]))
+        : new Map(dt.map((t) => [t.ticker, Number(t.supply ?? 0)]));
 
       const next = [...current];
       let changed = false;
@@ -22915,6 +22941,24 @@ function TransactionsScreen({ walletMeta, setToast, deployedTokens }) {
  // Falls back to LS-mirror when the parent prop hasn't propagated yet
  // (rare; mainly defensive against a bare mount).
   const activeTickers = useMemo(() => {
+    // PREFERRED: on-chain indexer registry — every ticker the
+    // indexer has seen DEPLOY'd is "active" for win-judgment
+    // purposes (the ledger doesn't care about "fully minted" —
+    // that's a separate `creditWinReward` concern). User reported
+    // a real bug: a LIVE on-chain ticker was being treated as
+    // INVALID because the local deployedTokens cache had a stale
+    // "pending" status. Indexer view fixes that.
+    //
+    // FALLBACK: local cache. Only consulted when the indexer
+    // hasn't booted yet (rare — by the time the user is on the
+    // LEDGER screen, fast-bootstrap has typically completed).
+    // Local cache filter keeps the original `status === "active"`
+    // gate because that's all we have to go on without the
+    // indexer.
+    const indexerReg = fetchIndexedTokenRegistry();
+    if (indexerReg.size > 0) {
+      return new Set(indexerReg.keys());
+    }
     const list = Array.isArray(deployedTokens) && deployedTokens.length
       ? deployedTokens
       : (() => {
@@ -22928,6 +22972,11 @@ function TransactionsScreen({ walletMeta, setToast, deployedTokens }) {
       if (t && t.ticker && t.status === "active") s.add(t.ticker);
     }
     return s;
+    // No dep on the indexer's tick — fetchIndexedTokenRegistry()
+    // is a sync read from a singleton Map. The memo re-runs when
+    // `deployedTokens` prop changes (which the App re-emits when
+    // the indexer's snapshot poll lands new entries), so the
+    // indexer's growing registry is picked up naturally.
   }, [deployedTokens]);
  // Per-(address, network) cache key for the most recent Esplora response.
  // Without it, every navigation to LEDGER shows an empty table for
