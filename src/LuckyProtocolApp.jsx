@@ -15547,7 +15547,18 @@ function OnboardModal({ onDone, onClose }) {
               </button>
               <button
                 className="btx-btn-primary"
-                onClick={() => { setMode("import"); setImportText(""); setImportMsg(""); }}
+                onClick={() => {
+                  // Reset the import-surface state on entry so a
+                  // user who BACK'd out of a half-filled import
+                  // doesn't see stale words / priv key / error
+                  // when they come back in.
+                  setMode("import");
+                  setImportWords(Array(12).fill(""));
+                  setImportPrivKey("");
+                  setImportMsg("");
+                  setImportAddr("");
+                  setImportPath(null);
+                }}
                 disabled={busy}
                 style={{
                   width: "100%",
