@@ -41,6 +41,21 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,png,svg,webp,jpg,jpeg,ico,woff,woff2}"],
         // The bundled JS is ~1.3 MB; bump the size cap.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Immediate update on new SW — skip the "waiting" state and
+        // take control of all open tabs at once. Without these two
+        // flags the user's deployed build keeps serving the cached
+        // old app shell until EVERY tab of the site is closed and
+        // re-opened (PWA standard "wait for clean slate" behavior).
+        // For an active development cycle that's "I push a fix, the
+        // user reloads, the fix doesn't appear" — the user reported
+        // this exact pain. skipWaiting + clientsClaim collapses
+        // it to "next reload after deploy = new version".
+        skipWaiting: true,
+        clientsClaim: true,
+        // Strip stale precaches from previous SW versions on
+        // activation so the cache doesn't grow forever and old
+        // chunks aren't accidentally served.
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           // ALL chain RPC must hit the network — never serve a cached
           // tip-height / block / address-utxo response. A stale chain
