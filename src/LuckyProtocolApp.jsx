@@ -7840,21 +7840,24 @@ function CasinoCss() {
          even tighter — topbar tiles drop to 2 cols, gold-rule fonts
          shrink further. */
       @media (max-width: 480px) {
-        /* Topbar 2x3 grid. Clean-slate the borders rather than
-           trying to incrementally override the 3-col rules — the
-           previous :nth-last-child(-n+3):nth-child(odd) re-add was
-           contradictory and left the MIN FEE RATE / STATUS column
-           without a visible separator (user-reported). Reset to
-           every tile having both borders, then strip the right
-           border on the right column and the bottom border on
-           the last row. */
+        /* Topbar 2x3 grid. CRITICAL: the parent 900px rule sets
+           :nth-child(3n) { border-right: none } and
+           :nth-last-child(-n+3) { border-bottom: none }, which have
+           HIGHER specificity than the bare .hxm-stat selector here
+           (pseudo-class > no pseudo-class). Without !important the
+           2-col layout inherits the 3-col strip-rules and lands
+           with broken separators (INDEXER SCAN missing its right
+           border = no vertical between row-2 cells; MIN FEE RATE
+           missing its bottom border = no horizontal between row-2
+           and row-3). User-reported both. !important wins the
+           specificity battle. */
         .hxm-topbar { grid-template-columns: repeat(2, 1fr); }
         .hxm-stat {
-          border-right: 1px solid var(--hxm-line);
-          border-bottom: 1px solid var(--hxm-line);
+          border-right: 1px solid var(--hxm-line) !important;
+          border-bottom: 1px solid var(--hxm-line) !important;
         }
-        .hxm-stat:nth-child(2n) { border-right: none; }
-        .hxm-stat:nth-last-child(-n+2) { border-bottom: none; }
+        .hxm-stat:nth-child(2n) { border-right: none !important; }
+        .hxm-stat:nth-last-child(-n+2) { border-bottom: none !important; }
 
         .btx-modal-card { padding: 18px 14px !important; }
 
@@ -7979,9 +7982,16 @@ function CasinoCss() {
            cutoff issue seen earlier on portrait mobile). */
         .hxm-viewport { flex: 0 0 auto; min-height: 0; }
         .hxm-body { flex: 0 0 auto; flex-direction: column; min-height: 0; }
+        /* Zero horizontal padding on .hxm-center in landscape so the
+           hero banner and game cards go EDGE TO EDGE. User reported
+           Chrome landscape view felt "not full screen" because of
+           the 10px side gutter; with that gone, both the banner
+           and the card row align cleanly with the viewport edges
+           (they're both children of .btx-screen which has no
+           horizontal padding either). */
         .hxm-center {
           flex: 0 0 auto;
-          padding: 8px 10px 12px;
+          padding: 8px 0 12px;
           overflow-y: visible;
           overflow-x: auto;
         }
