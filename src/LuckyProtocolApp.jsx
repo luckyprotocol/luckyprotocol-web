@@ -7484,6 +7484,166 @@ function CasinoCss() {
         background: radial-gradient(circle at 35% 35%, #ffe88a, #d4af37 60%, #6a4408 100%);
         cursor: pointer; border: 1px solid #5a4408;
       }
+
+      /* ==========================================================
+       * MOBILE ADAPTATION — PHASE 1 (CSS-only, zero JSX changes)
+       *
+       * GOAL: make the app usable on phones/tablets without touching
+       * any desktop styles. Every rule below is scoped inside a
+       * media query so widescreen viewports (>= 901px) render
+       * pixel-identically to before.
+       *
+       * STRATEGY at <= 900px:
+       *   1. .hxm-app turns column-stack (sidebar-left on top,
+       *      viewport below). Page scrolls naturally instead of
+       *      pinning the app shell to 100vh.
+       *   2. .hxm-sidebar-left becomes a horizontal scrollable strip
+       *      of nav icons. Logo + bottom chrome (VEGAS stamp, DONATE,
+       *      LocalTimeClock) hide — they're not navigation-critical
+       *      and would dominate vertical space.
+       *   3. .hxm-body also column-stacks: .hxm-center first,
+       *      .hxm-sidebar-right (MINE TARGET / WALLET / AI COPILOT
+       *      panels) below as a stacked section.
+       *   4. .hxm-topbar wraps its 6 tiles into a 3-column grid
+       *      (2 rows). Borders rewire so the grid feels intentional
+       *      instead of a clipped row.
+       *   5. .btx-modal-blocker pads down to 8px and .btx-modal-card
+       *      goes full-width inside it — onboarding/risk/etc. become
+       *      usable on a 375px viewport.
+       *   6. .btx-screen / .hxm-center side paddings tighten so
+       *      content doesn't get squeezed against the gutters.
+       *
+       * NOT IN PHASE 1 (deferred to Phase 2/3):
+       *   - Hamburger drawer for left nav (this Phase keeps the
+       *     horizontal-strip approach which works on tablets and
+       *     wider phones).
+       *   - Per-room game layout tuning (BRONZE wheel, GOLD reel,
+       *     SILVER cards still oversize on a 375px viewport — they
+       *     get a horizontal scroll fallback for now).
+       *   - Touch-target audit (44px hit-area sweep).
+       * ========================================================== */
+
+      @media (max-width: 900px) {
+        /* Let the page scroll naturally instead of pinning the app
+           shell to 100vh — mobile URL bars + safe areas make
+           strict-100vh awkward, and a long Settings page should be
+           able to grow past the fold. */
+        html, body, #root { height: auto; min-height: 100%; }
+        .hxm-app {
+          flex-direction: column;
+          height: auto;
+          min-height: 100vh;
+          min-height: 100dvh; /* iOS Safari: viewport without URL bar */
+        }
+
+        /* Left nav becomes a horizontal icon strip at the top.
+           Logo / vegas stamp / donate / clock hide — they're
+           secondary, the user can still reach DONATE from inside
+           settings, and the clock is non-essential on mobile. */
+        .hxm-sidebar-left {
+          width: 100%;
+          height: auto;
+          flex-direction: row;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 6px 8px;
+          gap: 4px;
+          border-right: none;
+          border-bottom: 1px solid var(--hxm-line);
+          -webkit-overflow-scrolling: touch;
+        }
+        .hxm-sidebar-left .hxm-logo,
+        .hxm-sidebar-left .hxm-vegas,
+        .hxm-sidebar-left .hxm-vegas-stamp,
+        .hxm-sidebar-left .hxm-clock,
+        .hxm-sidebar-left .hxm-donate { display: none; }
+
+        /* Nav buttons: keep icon+label visible but compact. The
+           icon-only collapse is a Phase-2 polish (needs a JSX wrapper
+           on the label text to target it cleanly). For now we let
+           them flex naturally and rely on horizontal scroll if the
+           full set doesn't fit. */
+        .hxm-nav-btn {
+          flex: 0 0 auto;
+          padding: 8px 10px;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+
+        /* Body becomes column too — center on top, right sidebar
+           below as a stacked section. Both grow naturally with
+           their content; the outer page scrolls. */
+        .hxm-body { flex-direction: column; }
+        .hxm-center {
+          padding: 8px 10px 0;
+          overflow-y: visible;
+        }
+        .hxm-sidebar-right {
+          width: 100%;
+          padding: 12px 10px 16px;
+          overflow-y: visible;
+          border-top: 1px solid var(--hxm-line);
+          margin-top: 12px;
+        }
+
+        /* Topbar: 6 tiles in 3 cols × 2 rows. Borders rewire so the
+           grid lines feel intentional. */
+        .hxm-topbar {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 0;
+          padding: 4px 8px;
+        }
+        .hxm-stat {
+          border-right: 1px solid var(--hxm-line);
+          border-bottom: 1px solid var(--hxm-line);
+          padding: 6px 8px;
+          gap: 6px;
+        }
+        .hxm-stat:nth-child(3n) { border-right: none; }
+        .hxm-stat:nth-last-child(-n+3) { border-bottom: none; }
+        .hxm-stat-icon { width: 24px; height: 24px; }
+        .hxm-stat-label { font-size: 8px; }
+        .hxm-stat-val { font-size: 11.5px; }
+        .hxm-stat-sub { font-size: 8.5px; }
+
+        /* Modal cards: full-width on phone, less wrapper padding.
+           The body content inside each modal still respects its own
+           inner padding/gaps. */
+        .btx-modal-blocker { padding: 8px; }
+        .btx-modal-card {
+          max-width: 100% !important;
+          width: 100% !important;
+          padding: 24px 18px !important;
+          min-height: auto !important;
+        }
+      }
+
+      /* Sub-breakpoint for phone viewports (e.g. iPhone SE 375px):
+         even tighter — topbar tiles drop to 2 cols, gold-rule fonts
+         shrink further. */
+      @media (max-width: 480px) {
+        .hxm-topbar { grid-template-columns: repeat(2, 1fr); }
+        .hxm-stat:nth-child(3n) { border-right: 1px solid var(--hxm-line); }
+        .hxm-stat:nth-child(2n) { border-right: none; }
+        .hxm-stat:nth-last-child(-n+2) { border-bottom: none; }
+        .hxm-stat:nth-last-child(-n+3):nth-child(odd) { border-bottom: 1px solid var(--hxm-line); }
+
+        .btx-modal-card { padding: 18px 14px !important; }
+
+        /* When the casino-interior backdrop wrapper appears inside the
+           wallet/settings tab (Onboard/Alchemy/RiskAck/Wipe/RiskDisclosure),
+           its computed minHeight of calc(100vh - 110px) was tuned for
+           the desktop topbar + footer. On mobile both grow taller
+           (wrapped topbar adds ~30px); switch to dvh so the iOS
+           dynamic toolbar doesn't clip the centred card. The Phase-1
+           CSS-only override is via attribute selectors targeting the
+           inline style minHeight value — defensive, doesn't require
+           touching the JSX. */
+        [style*="calc(100vh - 110px)"] {
+          min-height: calc(100dvh - 140px) !important;
+        }
+      }
     `), null)}</>
   );
 }
