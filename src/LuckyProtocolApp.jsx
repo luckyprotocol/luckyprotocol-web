@@ -7945,11 +7945,32 @@ function CasinoCss() {
           backdrop-filter: blur(2px);
         }
 
-        /* Hide topbar entirely — saves ~75px vertical for the
-           short landscape viewport. The same data is visible in
-           SETTINGS / WALLET / INDEX when the user actually needs
-           it. */
-        .hxm-topbar { display: none; }
+        /* Topbar — restored in landscape per user request. Force
+           single-row flex (overriding the portrait 3-col grid
+           that fires at width <= 900). Tile internals shrink a
+           bit so 6 tiles fit across the landscape width minus
+           the 54px hamburger clearance. Borders restored to
+           "right border between adjacent tiles, none on last,
+           no bottom" (the portrait grid added bottom borders
+           which read wrong in a single row). */
+        .hxm-topbar {
+          display: flex !important;
+          grid-template-columns: none !important;
+          padding: 3px 8px 3px 54px;
+        }
+        .hxm-stat {
+          border-bottom: none;
+          border-right: 1px solid var(--hxm-line);
+          padding: 4px 6px;
+          gap: 5px;
+        }
+        .hxm-stat:nth-child(3n) { border-right: 1px solid var(--hxm-line); }
+        .hxm-stat:nth-child(2n) { border-right: 1px solid var(--hxm-line); }
+        .hxm-stat:last-child { border-right: none; }
+        .hxm-stat-icon { width: 22px; height: 22px; }
+        .hxm-stat-label { font-size: 7.5px; }
+        .hxm-stat-val { font-size: 11px; }
+        .hxm-stat-sub { font-size: 8px; }
 
         /* Right sidebar gone (kept from previous commit). */
         .hxm-sidebar-right { display: none; }
