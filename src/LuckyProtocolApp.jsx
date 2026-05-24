@@ -7788,7 +7788,9 @@ function CasinoCss() {
            don't earn their vertical space on a narrow viewport. The
            MINE-target picker is still reachable via the INDEX nav,
            and the wallet summary lives in WALLET. AI COPILOT is a
-           COMING SOON placeholder anyway. */
+           COMING SOON placeholder anyway. (See the second media
+           query below for the landscape-phone case where width > 900
+           but it's still a phone — also hide there.) */
         .hxm-sidebar-right { display: none; }
 
         /* Topbar: 6 tiles in 3 cols × 2 rows. Borders rewire so the
@@ -7856,6 +7858,23 @@ function CasinoCss() {
         .hxm-room-grid {
           grid-template-columns: 1fr !important;
         }
+      }
+
+      /* Landscape-phone breakpoint — catches phones held sideways
+         whose width exceeds the 900px breakpoint above (iPhone 12
+         Pro Max landscape is 926, 14 Pro Max is 932, Galaxy S22
+         Ultra is 915 — all > 900). Tablets in landscape are
+         excluded because their viewport height is much taller
+         (iPad Pro 11" landscape is 834 tall; even iPad mini is 768
+         tall) — every common phone landscape has height <= 500.
+         So orientation: landscape + max-height: 500 catches phones
+         specifically without sweeping in tablets.
+
+         Currently only hides the right sidebar (the user-reported
+         issue). If more landscape-phone fixes accumulate, add
+         them inside this block. */
+      @media (orientation: landscape) and (max-height: 500px) {
+        .hxm-sidebar-right { display: none; }
       }
     `), null)}</>
   );
@@ -8881,7 +8900,12 @@ function TokenPickerModal({ state, onPick, onClose }) {
  // Page index (0-based). Resets when the user types in the search
  // box (so they always land on page 0 of the filtered results).
   const [page, setPage] = useState(0);
-  const PAGE_SIZE = 10;
+ // 15 per page — bumped from 10 so the picker shows more rows per
+ // screen on the desktop card (720x82vh) without forcing extra
+ // page-flips, while still leaving a generous footer for the
+ // pagination bar. Mobile gets a shorter row count visually but
+ // the same logical page size.
+  const PAGE_SIZE = 15;
 
  // Close on Escape
   useEffect(() => {
@@ -9148,10 +9172,15 @@ function TokenPickerModal({ state, onPick, onClose }) {
           })}
         </div>
 
-        {/* Pagination bar — visible whenever the filtered set has more
-            than one page. Hidden for empty lists (no rows to page over)
-            and single-page lists (no UX value). */}
-        {tokens.length > 0 && totalPages > 1 && (
+        {/* Pagination bar — visible whenever the filtered set has at
+            least one row. Previously hidden when totalPages === 1
+            because there's nothing to "page" to, but the user found
+            it confusing — they couldn't tell whether pagination was
+            supported or whether they were seeing all rows. Showing
+            a disabled "page 1 / 1" with a row count makes the
+            affordance discoverable. Hidden only for empty results
+            (the empty-state message is already explicit there). */}
+        {tokens.length > 0 && (
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "8px 18px",
