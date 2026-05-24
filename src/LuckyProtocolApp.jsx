@@ -7863,18 +7863,70 @@ function CasinoCss() {
       /* Landscape-phone breakpoint — catches phones held sideways
          whose width exceeds the 900px breakpoint above (iPhone 12
          Pro Max landscape is 926, 14 Pro Max is 932, Galaxy S22
-         Ultra is 915 — all > 900). Tablets in landscape are
-         excluded because their viewport height is much taller
-         (iPad Pro 11" landscape is 834 tall; even iPad mini is 768
-         tall) — every common phone landscape has height <= 500.
-         So orientation: landscape + max-height: 500 catches phones
-         specifically without sweeping in tablets.
+         Ultra is 915 — all > 900). max-height: 600 bumped from 500
+         to catch any landscape with limited vertical room — still
+         safely excludes tablets (iPad mini landscape is 768 tall,
+         iPad Pro 11" is 834).
 
-         Currently only hides the right sidebar (the user-reported
-         issue). If more landscape-phone fixes accumulate, add
-         them inside this block. */
-      @media (orientation: landscape) and (max-height: 500px) {
+         Goal in this block: make the dashboard fit in ONE landscape
+         viewport with no scroll. Banner stretches full width across
+         the top, 4 GameCards squeeze into a single row below, right
+         sidebar removed entirely. */
+      @media (orientation: landscape) and (max-height: 600px) {
+        /* Right sidebar gone — per user request, the MINE TARGET /
+           AI COPILOT / WALLET-UTXO panels don't fit landscape. */
         .hxm-sidebar-right { display: none; }
+
+        /* Banner stretches the full width but flattens vertically
+           (the 2.5:1 source image still fills with object-fit:cover
+           cropping; the flatter frame just shows a narrower
+           horizontal slice). minHeight floor drops from 200 to 80
+           so the banner takes a single strip across the top
+           instead of soaking up the dashboard column. */
+        .hxm-hero {
+          flex: 0 0 auto !important;
+          min-height: 80px !important;
+          max-height: 120px;
+        }
+
+        /* 4 GameCards in a single row below the banner. Override
+           the inline desktop default (already 4 cols) AND the
+           portrait-mobile override (2 cols) — we want one wide row
+           in landscape regardless of width. */
+        .hxm-room-grid {
+          grid-template-columns: repeat(4, 1fr) !important;
+          gap: 8px !important;
+          margin-top: 10px !important;
+        }
+
+        /* Tighten each GameCard so 4 fit horizontally and the row
+           total height stays under the remaining viewport budget
+           (~260px after banner + topbar + footer + .hxm-center
+           paddings). Card preview image (170px hardcoded inline)
+           shrinks to 100, title fontsize from 30 to 20, paddings
+           tighten. */
+        .hxm-room-grid > .hxm-bordered {
+          padding: 10px 8px !important;
+          border-radius: 8px;
+        }
+        .hxm-room-grid .hxm-cinzel.metal-iron,
+        .hxm-room-grid .hxm-cinzel.metal-bronze,
+        .hxm-room-grid .hxm-cinzel.metal-silver,
+        .hxm-room-grid .hxm-cinzel.metal-gold {
+          font-size: 18px !important;
+        }
+        .hxm-room-grid > .hxm-bordered > div:nth-child(2) {
+          /* The "image preview" div is the 2nd child (after the title
+             block) with height: 170 inline. Squeeze it. */
+          height: 100px !important;
+          margin-bottom: 6px !important;
+        }
+
+        /* Topbar pads-left already 54px from the hamburger clearance,
+           keep it. But the hamburger isn't ideal in landscape — the
+           user can already see everything in one shot. Leave as-is
+           for now (the menu still works); revisit if we need to
+           reclaim those 54px. */
       }
     `), null)}</>
   );
@@ -10541,7 +10593,7 @@ function TokenHoldersDetail({ token, ownAddress, onBack }) {
 
 function DashboardHero() {
   return (
-    <div style={{
+    <div className="hxm-hero" style={{
       position: "relative",
       borderRadius: 14,
       overflow: "hidden",
