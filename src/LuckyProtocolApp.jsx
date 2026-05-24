@@ -7988,10 +7988,13 @@ function CasinoCss() {
            the 10px side gutter; with that gone, both the banner
            and the card row align cleanly with the viewport edges
            (they're both children of .btx-screen which has no
-           horizontal padding either). */
+           horizontal padding either).
+           Vertical padding tightened (8 -> 4 top, 12 -> 6 bottom)
+           per user feedback that the gap between hero and game
+           cards was too big in landscape. */
         .hxm-center {
           flex: 0 0 auto;
-          padding: 8px 0 12px;
+          padding: 4px 0 6px;
           overflow-y: visible;
           overflow-x: auto;
         }
@@ -8010,10 +8013,13 @@ function CasinoCss() {
            inner Preview components (CardPreview, RoulettePreview,
            etc.) are hardcoded at 160x160 inline so any container
            shrinkage would push them OUT of the card (the bug the
-           user reported as "穿模/clipping"). */
+           user reported as "穿模/clipping").
+           margin-top tightened to 4 (was inline 14) per user
+           feedback that the gap below the hero was too big. */
         .hxm-room-grid {
           grid-template-columns: repeat(4, 1fr) !important;
           gap: 12px !important;
+          margin-top: 4px !important;
         }
 
         /* Modal cards full-width on landscape phone too. */
