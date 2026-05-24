@@ -68,6 +68,13 @@ import {
   hasWallet as walletHasWallet,
   syncWalletCache as walletSyncCache,
   getWalletNetwork as walletGetNetwork,
+  // Used by OnboardModal's import-existing-wallet branch: fail fast
+  // on a bad mnemonic BEFORE prompting for password, and preview
+  // the bc1q address as a sanity check (BIP84 derivation always
+  // produces bc1q on mainnet, but the defensive check guards against
+  // future schema changes that might land on a different path).
+  validateMnemonic as walletValidateMnemonic,
+  mnemonicToAddress as walletMnemonicToAddress,
 } from "./protocol/wallet.js";
 import {
   syncAddress as chainSyncAddress,
@@ -15045,11 +15052,21 @@ function OnboardModal({ onDone, onClose }) {
   const [pw2, setPw2] = useState("");
   const [pwMsg, setPwMsg] = useState("");
   const [busy, setBusy] = useState(false);
- // Import-existing-mnemonic was removed in 2026-05 — LUCKYPROTOCOL is
- // local-generation-only. The Rust backend's `cmd_commit_wallet` only
- // accepts mnemonics minted in the current session by
- // `cmd_generate_mnemonic`, so the only path through onboarding is the
- // 1→2→3→4 generate-and-back-up sequence below.
+ // Import-existing-wallet flow. Re-enabled in 2026-05 after the
+ // earlier "local-generation-only" rule was lifted. Mnemonic
+ // import is fully supported; private-key import is gated behind
+ // a "Phase 2" notice because it requires wallet schema changes
+ // (the current encrypted-blob format stores a mnemonic, not a
+ // raw 32-byte key — supporting both would need a type tag and
+ // a parallel derivation path in unlockSession).
+ //
+ // `mode` drives which surface step 1 shows:
+ //   ""        → the original choose-flow card (GENERATE + IMPORT buttons)
+ //   "import"  → paste-textarea + validate + derive-preview surface
+  const [mode, setMode] = useState("");
+  const [importText, setImportText] = useState("");
+  const [importMsg, setImportMsg] = useState("");
+  const [importAddr, setImportAddr] = useState("");
 
   const generate = async () => {
     setBusy(true);
@@ -15058,6 +15075,44 @@ function OnboardModal({ onDone, onClose }) {
       setSeed(phrase.trim().split(/\s+/));
       setStep(2);
     } finally { setBusy(false); }
+  };
+
+ // Import flow: validate a pasted BIP39 mnemonic, derive its
+ // bc1q address, and short-circuit into the SET PASSWORD step
+ // (no need for the BACKUP + VERIFY steps — the user already has
+ // the words written down somewhere). On any failure the user
+ // stays on the import surface with a red error msg.
+  const importMnemonic = async () => {
+    setImportMsg("");
+    setImportAddr("");
+    const raw = importText.trim().toLowerCase().replace(/\s+/g, " ");
+    const words = raw.split(" ").filter(Boolean);
+    if (words.length !== 12 && words.length !== 24) {
+      setImportMsg(`Expected 12 or 24 words, got ${words.length}.`);
+      return;
+    }
+    if (!walletValidateMnemonic(raw)) {
+      setImportMsg("Invalid BIP39 mnemonic (checksum mismatch or unknown word). Double-check the spelling and order.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const address = await walletMnemonicToAddress(raw);
+      if (!address.startsWith("bc1q")) {
+        setImportMsg(`Derived address ${address.slice(0, 10)}… is not bc1q (BIP84 native SegWit). LUCKYPROTOCOL only supports bc1q wallets — please use a different mnemonic, or generate a new wallet instead.`);
+        return;
+      }
+      setImportAddr(address);
+      setSeed(words);
+      // Jump straight to the SET PASSWORD step. We deliberately
+      // skip BACKUP (the user already has the words) and VERIFY
+      // (they typed them in by hand — that IS a verification).
+      setStep(4);
+    } catch (e) {
+      setImportMsg(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const goVerify = () => {
@@ -15103,13 +15158,23 @@ function OnboardModal({ onDone, onClose }) {
     } finally { setBusy(false); }
   };
 
-  const stepLabel = `[${step}/4]`;
-  const titleByStep = {
-    1: "FIRST RUN :: SETUP",
-    2: "BACKUP SEED PHRASE",
-    3: "VERIFY BACKUP",
-    4: "SET LOGIN PASSWORD",
-  };
+  // Step counter and title are flow-aware: the generate path runs
+  // through 4 steps (setup → backup → verify → password), but the
+  // import path only has 2 (paste-mnemonic → password) — the
+  // BACKUP and VERIFY steps don't apply when the user already has
+  // the words on hand. Showing "[1/4]" then jumping to "[4/4]" on
+  // import would be jarring; map to 1/2 + 2/2 instead.
+  const stepLabel = mode === "import"
+    ? (step === 4 ? "[2/2]" : "[1/2]")
+    : `[${step}/4]`;
+  const titleByStep = mode === "import"
+    ? { 1: "IMPORT WALLET :: PASTE SEED", 4: "SET LOGIN PASSWORD" }
+    : {
+        1: "FIRST RUN :: SETUP",
+        2: "BACKUP SEED PHRASE",
+        3: "VERIFY BACKUP",
+        4: "SET LOGIN PASSWORD",
+      };
 
   // ESC key still dismisses for keyboard users. We dropped the
   // click-outside handler along with the backdrop — there IS no
@@ -15182,7 +15247,15 @@ function OnboardModal({ onDone, onClose }) {
             {step > 1 && (
               <button
                 type="button"
-                onClick={() => setStep(step - 1)}
+                onClick={() => {
+                  // Import flow short-circuits from step 1 (paste
+                  // mnemonic) directly to step 4 (set password).
+                  // BACK from step 4 should land back on the
+                  // import surface, NOT step 3 (verify) — the
+                  // verify step exists only for the generate flow.
+                  if (step === 4 && mode === "import") setStep(1);
+                  else setStep(step - 1);
+                }}
                 className="btx-btn-back"
                 style={{ padding: "7px 16px", fontSize: 12 }}
                 title="Back to previous step"
@@ -15237,7 +15310,7 @@ function OnboardModal({ onDone, onClose }) {
             walks through 1 → 2 → 3 → 4. */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
 
-        {step === 1 && (
+        {step === 1 && mode === "" && (
           <>
             {/* Hero paragraph. The "what is this" line — larger than the
                 body text, slightly muted color, comfortable line-length
@@ -15283,10 +15356,11 @@ function OnboardModal({ onDone, onClose }) {
                   color: "var(--hxm-amber)",
                   marginBottom: 4,
                   fontWeight: 700,
-                }}>LOCAL GENERATION ONLY</div>
-                LUCKYPROTOCOL does not import existing seed phrases. Pasting a mnemonic
-                someone else gave you is a well-known phishing pattern — they fund it,
-                you fund it more, they sweep it.
+                }}>NEVER PASTE SOMEONE ELSE&apos;S SEED</div>
+                Generate fresh if you don&apos;t already have a wallet. Importing a
+                mnemonic someone gave you is a well-known phishing pattern — they
+                fund it, you fund it more, they sweep it. Only import a seed phrase
+                you generated yourself or migrated from another wallet you control.
               </div>
             </div>
 
@@ -15330,7 +15404,12 @@ function OnboardModal({ onDone, onClose }) {
             {/* CTA section — sits naturally below the bullets with
                 a comfortable gap. The card is short enough that we
                 don't need to push the button to the bottom; the
-                margin-top here is the breathing room. */}
+                margin-top here is the breathing room. Two CTAs now:
+                generate-new (primary) + import-existing (secondary
+                ghost button). Import lands on a dedicated paste
+                surface (mode === "import" branch below) and
+                short-circuits the BACKUP + VERIFY steps because
+                an imported user already has the words. */}
             <div style={{
               marginTop: 26,
               display: "flex",
@@ -15351,6 +15430,19 @@ function OnboardModal({ onDone, onClose }) {
               >
                 {busy ? "GENERATING..." : "GENERATE NEW WALLET"}
               </button>
+              <button
+                className="btx-btn-ghost"
+                onClick={() => { setMode("import"); setImportText(""); setImportMsg(""); }}
+                disabled={busy}
+                style={{
+                  width: "100%",
+                  padding: "12px 28px",
+                  fontSize: 13,
+                  letterSpacing: "0.2em",
+                }}
+              >
+                IMPORT EXISTING WALLET
+              </button>
               <p style={{
                 fontSize: 10.5,
                 color: "var(--hxm-text-mute)",
@@ -15360,6 +15452,138 @@ function OnboardModal({ onDone, onClose }) {
               }}>
                 ~1 second · runs entirely in this browser
               </p>
+            </div>
+          </>
+        )}
+
+        {step === 1 && mode === "import" && (
+          <>
+            {/* Import surface — paste 12 or 24 BIP39 words. Validates
+                the checksum + wordlist via @scure/bip39, then
+                previews the derived bc1q address as a sanity check
+                before commit. The bc1q guard enforces that we only
+                accept BIP84 native-SegWit wallets (matches the
+                rest of the protocol; legacy 1... and SegWit-wrap
+                3... addresses would silently land at a different
+                derivation than the user expected). */}
+            <p style={{
+              fontSize: 14,
+              lineHeight: 1.7,
+              color: "var(--hxm-text)",
+              margin: 0,
+              letterSpacing: "0.01em",
+            }}>
+              Paste your <b style={{ color: "var(--hxm-gold-bright)" }}>12 or 24-word
+              BIP39 seed phrase</b> separated by spaces. The phrase is processed
+              entirely on this device — it never touches the network.
+            </p>
+
+            <textarea
+              autoFocus
+              value={importText}
+              onChange={(e) => { setImportText(e.target.value); setImportMsg(""); setImportAddr(""); }}
+              placeholder="word1 word2 word3 ... word12"
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              className="hxm-mono"
+              style={{
+                marginTop: 14,
+                width: "100%",
+                minHeight: 96,
+                padding: "12px 14px",
+                background: "rgba(0,0,0,0.55)",
+                border: "1px solid var(--hxm-line-2)",
+                borderRadius: 4,
+                color: "var(--hxm-text)",
+                fontSize: 13,
+                lineHeight: 1.6,
+                outline: "none",
+                resize: "vertical",
+                fontFamily: "'JetBrains Mono', monospace",
+              }}
+            />
+
+            {/* Status row — either an error msg (red) or the
+                derived bc1q address preview (gold). */}
+            {importMsg && (
+              <div className="hxm-mono" style={{
+                marginTop: 10,
+                fontSize: 11.5,
+                color: "var(--hxm-red)",
+                lineHeight: 1.55,
+              }}>
+                {importMsg}
+              </div>
+            )}
+            {importAddr && (
+              <div className="hxm-mono" style={{
+                marginTop: 10,
+                fontSize: 11,
+                color: "var(--hxm-text-dim)",
+                wordBreak: "break-all",
+              }}>
+                derived: <span style={{ color: "var(--hxm-gold-bright)" }}>{importAddr}</span>
+              </div>
+            )}
+
+            {/* Amber callout: bc1q-only restriction + phishing reminder. */}
+            <div style={{
+              marginTop: 16,
+              display: "flex",
+              gap: 12,
+              padding: "12px 14px",
+              border: "1px solid rgba(245, 220, 137, 0.32)",
+              borderLeft: "3px solid var(--hxm-amber)",
+              background: "linear-gradient(180deg, rgba(245, 220, 137, 0.06) 0%, rgba(212, 162, 58, 0.03) 100%)",
+              borderRadius: 3,
+            }}>
+              <div style={{ flexShrink: 0, color: "var(--hxm-amber)", fontSize: 16, lineHeight: 1 }}>⚠</div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.6, color: "var(--hxm-text-dim)" }}>
+                Only <b style={{ color: "var(--hxm-amber)" }}>bc1q (BIP84 native SegWit)</b> wallets
+                are accepted. If your existing wallet uses legacy (<code>1…</code>) or wrapped-SegWit
+                (<code>3…</code>) addresses, the funds at THOSE addresses will not appear here —
+                only the <code>bc1q…</code> derivation of the same seed. Private-key import is
+                planned for a future release.
+              </div>
+            </div>
+
+            <div style={{
+              marginTop: 22,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+            }}>
+              <button
+                className="btx-btn-primary"
+                onClick={importMnemonic}
+                disabled={busy || !importText.trim()}
+                style={{
+                  width: "100%",
+                  padding: "13px 28px",
+                  fontSize: 14,
+                  letterSpacing: "0.22em",
+                  opacity: busy || !importText.trim() ? 0.5 : 1,
+                  cursor: busy || !importText.trim() ? "not-allowed" : "pointer",
+                }}
+              >
+                {busy ? "VALIDATING..." : "VALIDATE & CONTINUE →"}
+              </button>
+              <button
+                className="btx-btn-ghost"
+                onClick={() => { setMode(""); setImportText(""); setImportMsg(""); setImportAddr(""); }}
+                disabled={busy}
+                style={{
+                  width: "100%",
+                  padding: "10px 20px",
+                  fontSize: 12,
+                  letterSpacing: "0.2em",
+                }}
+              >
+                ← BACK
+              </button>
             </div>
           </>
         )}

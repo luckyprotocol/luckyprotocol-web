@@ -68,6 +68,9 @@ export function generateMnemonic() {
 
 /** True iff the mnemonic passes BIP39 checksum + wordlist. */
 export { validateMnemonic };
+/** BIP39 mnemonic → BIP84 bc1q address (mainnet). Used by the import
+ * flow to preview the address before storage. */
+export { mnemonicToAddress };
 
 /**
  * Probe whether a wallet exists in IndexedDB. Returns a Promise<bool>.

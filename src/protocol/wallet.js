@@ -91,6 +91,25 @@ export const generateMnemonic = async () => {
   return walletWeb.generateMnemonic();
 };
 
+// BIP39 checksum + wordlist validator. Used by the OnboardModal's
+// import-existing-wallet flow to fail fast on a typo before asking
+// the user for a password — much friendlier than letting commitWallet
+// throw "invalid mnemonic" after the password step.
+export const validateMnemonic = (mnemonic) => {
+  return walletWeb.validateMnemonic(mnemonic);
+};
+
+// Address derivation preview. Used by the import flow to show the
+// user the bc1q address they're about to commit, AND to enforce the
+// "must be bc1q (BIP84 native SegWit)" guard before storage. For any
+// valid BIP39 mnemonic on mainnet this always returns bc1q...
+// because we derive via the fixed BIP84 path m/84'/0'/0'/0/0; the
+// guard is defensive — a future schema change to a different
+// derivation path would silently break the assumption otherwise.
+export const mnemonicToAddress = async (mnemonic) => {
+  return await walletWeb.mnemonicToAddress(mnemonic);
+};
+
 export const commitWallet = async (mnemonic, password, network = DEFAULT_NETWORK) => {
   const info = await walletWeb.commitWallet(mnemonic, password, network);
   lsSet(LS_WALLET, {
