@@ -153,7 +153,7 @@ export function parsePrivateKey(input) {
   // Raw hex path (64 lowercase/uppercase chars).
   if (HEX_RE.test(s)) {
     const bytes = hexToBytes(s.toLowerCase());
-    if (!secp256k1.utils.isValidPrivateKey(bytes)) {
+    if (!secp256k1.utils.isValidSecretKey(bytes)) {
       throw new Error("invalid secp256k1 private key (out of curve order)");
     }
     return bytes;
@@ -178,7 +178,7 @@ export function parsePrivateKey(input) {
   if (decoded.length === 34 && decoded[33] !== 0x01) {
     throw new Error(`WIF trailing byte 0x${decoded[33].toString(16)} unrecognized (expected 0x01 for compressed)`);
   }
-  if (!secp256k1.utils.isValidPrivateKey(priv)) {
+  if (!secp256k1.utils.isValidSecretKey(priv)) {
     throw new Error("invalid secp256k1 private key (out of curve order)");
   }
   return priv;
