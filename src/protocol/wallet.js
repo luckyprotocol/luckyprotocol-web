@@ -120,6 +120,34 @@ export const commitWallet = async (mnemonic, password, network = DEFAULT_NETWORK
   return info;
 };
 
+// Sibling of commitWallet that accepts a raw WIF or 64-char hex
+// private key instead of a BIP39 mnemonic. Same storage schema —
+// internally the priv key gets a sentinel-prefixed entry in the
+// encrypted blob so unlockSession can branch derivation between
+// mnemonic-vs-priv-key wallets without a schema bump. The public
+// LS_WALLET mirror is identical (address + network + createdAt)
+// so the rest of the UI doesn't need to care which path created
+// the wallet.
+export const commitPrivateKey = async (privKeyInput, password, network = DEFAULT_NETWORK) => {
+  const info = await walletWeb.commitPrivateKey(privKeyInput, password, network);
+  lsSet(LS_WALLET, {
+    address: info.address,
+    network: info.network,
+    createdAt: Date.now(),
+  });
+  return info;
+};
+
+// Parse + preview an externally-provided private key (WIF or hex)
+// without committing. Used by the OnboardModal import flow to
+// derive the bc1q address before asking for a password — same
+// pattern as mnemonicToAddress. Throws if the input is malformed
+// or doesn't yield a bc1q address.
+export const privateKeyToAddress = async (privKeyInput) => {
+  const bytes = walletWeb.parsePrivateKey(privKeyInput);
+  return walletWeb.privateKeyToKeypair(bytes).address;
+};
+
 export const exportMnemonic = async (password) => {
   return await walletWeb.exportMnemonic(password);
 };

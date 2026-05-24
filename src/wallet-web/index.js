@@ -35,6 +35,9 @@ import {
   deriveBip84,
   deriveAddress,
   mnemonicToAddress,
+  parsePrivateKey,
+  privateKeyToKeypair,
+  bytesToHex,
 } from "./keys.js";
 import { setSession, isUnlocked, getSession, clearSession } from "./session.js";
 
@@ -71,6 +74,12 @@ export { validateMnemonic };
 /** BIP39 mnemonic → BIP84 bc1q address (mainnet). Used by the import
  * flow to preview the address before storage. */
 export { mnemonicToAddress };
+/** WIF / hex → 32-byte private key. Throws on bad input or wrong
+ * network. Used by the OnboardModal import flow for validation. */
+export { parsePrivateKey };
+/** 32-byte private key → bc1q address. Used by the import flow to
+ * preview the address before commit (mirrors mnemonicToAddress). */
+export { privateKeyToKeypair };
 
 /**
  * Probe whether a wallet exists in IndexedDB. Returns a Promise<bool>.
@@ -151,15 +160,39 @@ export async function unlockSession(password) {
     throw new Error("no wallet on this device");
   }
   const key = await deriveKey(password, blob.salt, blob.argon2);
-  let mnemonicBytes;
+  let plaintextBytes;
   try {
-    mnemonicBytes = await decrypt(blob.ciphertext, key);
+    plaintextBytes = await decrypt(blob.ciphertext, key);
   } catch {
     // AES-GCM auth tag mismatch → wrong password (or corrupted blob).
     // Don't leak which.
     throw new Error("wrong password");
   }
-  const mnemonic = new TextDecoder().decode(mnemonicBytes);
+  const plaintext = new TextDecoder().decode(plaintextBytes);
+
+  // Priv-key wallets are flagged by a sentinel prefix in the
+  // plaintext (see commitPrivateKey below). This lets us keep the
+  // SAME storage schema for mnemonic + priv-key wallets while
+  // branching the derivation path: mnemonic → BIP39+BIP84,
+  // priv-key → raw secp256k1 keypair. Existing v1 wallets are
+  // mnemonics with no prefix — they take the else branch
+  // unchanged so no migration is needed.
+  if (plaintext.startsWith(PRIVKEY_SENTINEL)) {
+    const hex = plaintext.slice(PRIVKEY_SENTINEL.length);
+    const { hexToBytes } = await __hexHelper();
+    const privateKey = hexToBytes(hex);
+    const { publicKey } = privateKeyToKeypair(privateKey);
+    setSession({
+      mnemonic: null, // priv-key wallets have no mnemonic
+      address: blob.address,
+      network: blob.network,
+      privateKey,
+      publicKey,
+    });
+    return { address: blob.address, network: blob.network };
+  }
+
+  const mnemonic = plaintext;
   const seed = await mnemonicToSeed(mnemonic);
   const { privateKey, publicKey } = deriveBip84(seed);
 
@@ -171,6 +204,78 @@ export async function unlockSession(password) {
     publicKey,
   });
   return { address: blob.address, network: blob.network };
+}
+
+// Sentinel prefix marking a stored plaintext as a raw 32-byte
+// private key (hex-encoded after the colon) rather than a BIP39
+// mnemonic. Chosen so it can't collide with any valid mnemonic
+// phrase (mnemonic words are lowercase a-z, the prefix has
+// double-underscore which can't appear in a BIP39 word).
+const PRIVKEY_SENTINEL = "__PRIVKEY__:";
+
+// Tiny hex decoder. Extracted because we don't want to import the
+// 32-byte assertion in keys.js's hexToBytes (which is private).
+// Inline so unlockSession doesn't pull in keys.js for the
+// mnemonic path. Kept as a lazy promise so the import survives
+// tree-shaking pressure on unused branches.
+async function __hexHelper() {
+  return {
+    hexToBytes: (hex) => {
+      if (typeof hex !== "string" || hex.length !== 64 || !/^[0-9a-f]+$/i.test(hex)) {
+        throw new Error("invalid hex private key in stored blob");
+      }
+      const out = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      return out;
+    },
+  };
+}
+
+/**
+ * Commit an externally-imported raw private key (WIF or 64-char
+ * hex) under the user's password. Mirrors commitWallet's storage
+ * schema — same Argon2 + AES-GCM + IndexedDB blob — but stores
+ * the hex-encoded priv key prefixed with PRIVKEY_SENTINEL so the
+ * unlock path can tell the two wallet types apart without a
+ * schemaVersion bump.
+ *
+ * Returns { address, network }. The derived bc1q address is also
+ * cached in the public wallet info; the actual private key only
+ * exists in the encrypted blob + the in-memory session.
+ */
+export async function commitPrivateKey(input, password, network = DEFAULT_NETWORK) {
+  if (network !== DEFAULT_NETWORK) {
+    throw new Error(`network not supported: ${network} (mainnet only)`);
+  }
+  if (!password || typeof password !== "string" || password.length < 1) {
+    throw new Error("password must be a non-empty string");
+  }
+  const privateKey = parsePrivateKey(input);
+  const { address, publicKey } = privateKeyToKeypair(privateKey);
+  if (!address.startsWith("bc1q")) {
+    throw new Error(`derived address ${address.slice(0, 8)}... is not bc1q (P2WPKH); only bc1q wallets supported`);
+  }
+
+  const salt = randomSalt(16);
+  const key = await deriveKey(password, salt);
+
+  const plaintext = PRIVKEY_SENTINEL + bytesToHex(privateKey);
+  const plaintextBytes = new TextEncoder().encode(plaintext);
+  const ciphertext = await encrypt(plaintextBytes, key);
+
+  const blob = {
+    schemaVersion: SCHEMA_VERSION,
+    network,
+    address,
+    createdAt: Date.now(),
+    ciphertext,
+    salt,
+    argon2: { ...ARGON2_PARAMS },
+  };
+  await putWallet(blob);
+
+  setSession({ mnemonic: null, address, network, privateKey, publicKey });
+  return { address, network };
 }
 
 /**
@@ -201,13 +306,20 @@ export async function exportMnemonic(password) {
   const blob = await getWallet();
   if (!blob) throw new Error("no wallet on this device");
   const key = await deriveKey(password, blob.salt, blob.argon2);
-  let mnemonicBytes;
+  let plaintextBytes;
   try {
-    mnemonicBytes = await decrypt(blob.ciphertext, key);
+    plaintextBytes = await decrypt(blob.ciphertext, key);
   } catch {
     throw new Error("wrong password");
   }
-  return new TextDecoder().decode(mnemonicBytes);
+  const plaintext = new TextDecoder().decode(plaintextBytes);
+  // Priv-key wallets have no mnemonic to export — fail loudly so
+  // the SettingsScreen "show recovery phrase" UI surfaces a useful
+  // message instead of leaking the sentinel-prefixed hex.
+  if (plaintext.startsWith(PRIVKEY_SENTINEL)) {
+    throw new Error("this wallet was imported from a raw private key; no BIP39 mnemonic is available");
+  }
+  return plaintext;
 }
 
 /**

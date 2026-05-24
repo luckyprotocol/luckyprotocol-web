@@ -75,6 +75,8 @@ import {
   // future schema changes that might land on a different path).
   validateMnemonic as walletValidateMnemonic,
   mnemonicToAddress as walletMnemonicToAddress,
+  commitPrivateKey as walletCommitPrivateKey,
+  privateKeyToAddress as walletPrivateKeyToAddress,
 } from "./protocol/wallet.js";
 import {
   syncAddress as chainSyncAddress,
@@ -939,6 +941,23 @@ const commitWalletMock = async (mnemonic, password) => {
 };
 const exportMnemonicMock = async (password) => walletExport(password);
 const wipeWalletMock = async () => walletWipe();
+// Same persistent-storage upgrade as commitWalletMock, but for the
+// raw-private-key import path. Kept as a separate wrapper rather than
+// branching inside one fn because the two have different signatures
+// (mnemonic-string vs WIF/hex-string) and trying to overload makes
+// the call sites less readable.
+const commitPrivateKeyMock = async (privKeyInput, password) => {
+  const out = await walletCommitPrivateKey(privKeyInput, password);
+  try {
+    if (navigator.storage && typeof navigator.storage.persist === "function") {
+      const already = await navigator.storage.persisted?.();
+      if (!already) await navigator.storage.persist();
+    }
+  } catch (e) {
+    console.warn("[wallet] persistent-storage request failed", e);
+  }
+  return out;
+};
 
 const DEFAULT_ENDPOINTS = [
   { kind: "esplora", url: "https://mempool.space/api",         locked: true },
@@ -15053,20 +15072,32 @@ function OnboardModal({ onDone, onClose }) {
   const [pwMsg, setPwMsg] = useState("");
   const [busy, setBusy] = useState(false);
  // Import-existing-wallet flow. Re-enabled in 2026-05 after the
- // earlier "local-generation-only" rule was lifted. Mnemonic
- // import is fully supported; private-key import is gated behind
- // a "Phase 2" notice because it requires wallet schema changes
- // (the current encrypted-blob format stores a mnemonic, not a
- // raw 32-byte key — supporting both would need a type tag and
- // a parallel derivation path in unlockSession).
+ // earlier "local-generation-only" rule was lifted. Supports BOTH
+ // BIP39 mnemonic (12 or 24 words, individual cells) AND a single
+ // raw private key (WIF or 64-char hex). The two inputs are
+ // mutually exclusive: if any word cell has content the priv key
+ // input goes disabled, and vice versa.
  //
  // `mode` drives which surface step 1 shows:
  //   ""        → the original choose-flow card (GENERATE + IMPORT buttons)
- //   "import"  → paste-textarea + validate + derive-preview surface
+ //   "import"  → 12-cell mnemonic grid + private-key row + validate
+ // `importPath` is set inside the import handler and forwarded to
+ // the SET PASSWORD step so submitPassword knows which commit fn
+ // to call.
   const [mode, setMode] = useState("");
-  const [importText, setImportText] = useState("");
+  const [importWords, setImportWords] = useState(() => Array(12).fill(""));
+  const [importPrivKey, setImportPrivKey] = useState("");
   const [importMsg, setImportMsg] = useState("");
   const [importAddr, setImportAddr] = useState("");
+  const [importPath, setImportPath] = useState(null); // "mnemonic" | "privkey" | null
+ // Refs to the 12 word inputs so auto-advance (typing space jumps
+ // to the next field) can call .focus() without a DOM query.
+  const wordRefs = useRef(Array(12).fill(null));
+ // True if ANY mnemonic cell has content. Used to disable the
+ // priv-key input (mutual exclusion). useMemo would be overkill —
+ // recomputed on every render but the array is tiny.
+  const hasAnyWord = importWords.some((w) => w && w.trim().length > 0);
+  const hasPrivKey = importPrivKey.trim().length > 0;
 
   const generate = async () => {
     setBusy(true);
@@ -15077,37 +15108,103 @@ function OnboardModal({ onDone, onClose }) {
     } finally { setBusy(false); }
   };
 
- // Import flow: validate a pasted BIP39 mnemonic, derive its
- // bc1q address, and short-circuit into the SET PASSWORD step
- // (no need for the BACKUP + VERIFY steps — the user already has
- // the words written down somewhere). On any failure the user
- // stays on the import surface with a red error msg.
-  const importMnemonic = async () => {
+ // Single-cell word editor. Auto-advances to the next field when
+ // the user types a space (so pasting "a b c" into cell 1 still
+ // fans out — useful when the user is partway through a paste-as-
+ // mnemonic flow). Also lowercases as they type so the BIP39
+ // wordlist match works case-insensitively.
+  const setWordAt = (i, val) => {
+    const v = String(val).toLowerCase();
+    // Bulk-paste handling: if the user types/pastes a string with
+    // whitespace into a single cell, split it across this cell and
+    // the cells to the right.
+    if (/\s/.test(v)) {
+      const tokens = v.split(/\s+/).filter(Boolean);
+      const next = [...importWords];
+      for (let k = 0; k < tokens.length && i + k < 12; k++) {
+        next[i + k] = tokens[k];
+      }
+      setImportWords(next);
+      const lastIdx = Math.min(i + tokens.length, 11);
+      wordRefs.current[lastIdx]?.focus();
+      setImportMsg("");
+      setImportAddr("");
+      return;
+    }
+    const next = [...importWords];
+    next[i] = v;
+    setImportWords(next);
     setImportMsg("");
     setImportAddr("");
-    const raw = importText.trim().toLowerCase().replace(/\s+/g, " ");
-    const words = raw.split(" ").filter(Boolean);
-    if (words.length !== 12 && words.length !== 24) {
-      setImportMsg(`Expected 12 or 24 words, got ${words.length}.`);
+  };
+
+ // Onpaste at the cell level — handle bulk-paste of "a b c..." into
+ // any cell, fanning out across the cells from that position. Mirrors
+ // setWordAt's whitespace path but reads from clipboard data.
+  const onWordPaste = (i, e) => {
+    const text = e.clipboardData?.getData("text") || "";
+    if (/\s/.test(text)) {
+      e.preventDefault();
+      setWordAt(i, text);
+    }
+  };
+
+ // Import flow handler. Branches on which input the user filled:
+ //   - mnemonic grid → validate words + BIP39 checksum, derive
+ //   - private key   → parse WIF/hex, derive bc1q
+ // After either path: stash the imported secret in state, set
+ // importPath so submitPassword routes to the right commit fn,
+ // and jump to step 4 (set password). Skipping BACKUP + VERIFY
+ // is intentional — the user typed (or pasted) the secret by
+ // hand, that IS the verification.
+  const submitImport = async () => {
+    setImportMsg("");
+    setImportAddr("");
+    if (hasAnyWord && hasPrivKey) {
+      setImportMsg("Fill EITHER the seed phrase OR a private key, not both. Clear one to continue.");
       return;
     }
-    if (!walletValidateMnemonic(raw)) {
-      setImportMsg("Invalid BIP39 mnemonic (checksum mismatch or unknown word). Double-check the spelling and order.");
+    if (!hasAnyWord && !hasPrivKey) {
+      setImportMsg("Paste either a 12 or 24-word BIP39 seed phrase OR a single private key.");
       return;
     }
+
     setBusy(true);
     try {
-      const address = await walletMnemonicToAddress(raw);
-      if (!address.startsWith("bc1q")) {
-        setImportMsg(`Derived address ${address.slice(0, 10)}… is not bc1q (BIP84 native SegWit). LUCKYPROTOCOL only supports bc1q wallets — please use a different mnemonic, or generate a new wallet instead.`);
-        return;
+      if (hasAnyWord) {
+        const words = importWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
+        if (words.length !== 12 && words.length !== 24) {
+          setImportMsg(`Expected 12 or 24 words, got ${words.length}.`);
+          return;
+        }
+        const phrase = words.join(" ");
+        if (!walletValidateMnemonic(phrase)) {
+          setImportMsg("Invalid BIP39 mnemonic (checksum mismatch or unknown word). Double-check spelling and order.");
+          return;
+        }
+        const address = await walletMnemonicToAddress(phrase);
+        if (!address.startsWith("bc1q")) {
+          setImportMsg(`Derived address ${address.slice(0, 10)}… is not bc1q. LUCKYPROTOCOL supports bc1q only — please use a different seed.`);
+          return;
+        }
+        setImportAddr(address);
+        setSeed(words);
+        setImportPath("mnemonic");
+        setStep(4);
+      } else {
+        // Private-key path. parsePrivateKey + privateKeyToAddress
+        // throw on bad input (WIF wrong network, hex bad length,
+        // scalar out of curve order, etc.) — surface those msgs
+        // directly to the user.
+        const address = await walletPrivateKeyToAddress(importPrivKey.trim());
+        if (!address.startsWith("bc1q")) {
+          setImportMsg(`Derived address ${address.slice(0, 10)}… is not bc1q. LUCKYPROTOCOL supports bc1q only.`);
+          return;
+        }
+        setImportAddr(address);
+        setImportPath("privkey");
+        setStep(4);
       }
-      setImportAddr(address);
-      setSeed(words);
-      // Jump straight to the SET PASSWORD step. We deliberately
-      // skip BACKUP (the user already has the words) and VERIFY
-      // (they typed them in by hand — that IS a verification).
-      setStep(4);
     } catch (e) {
       setImportMsg(e?.message ?? String(e));
     } finally {
@@ -15144,7 +15241,17 @@ function OnboardModal({ onDone, onClose }) {
     setBusy(true);
     setPwMsg("encrypting locally...");
     try {
-      await commitWalletMock(seed.join(" "), pw1);
+      // Branch on the import path that landed us here. The
+      // generate flow leaves importPath null and uses the mnemonic
+      // stored in `seed`. The import-mnemonic flow also stores
+      // words in `seed`. The import-privkey flow uses
+      // `importPrivKey` (the raw WIF/hex the user pasted), which
+      // gets re-parsed inside commitPrivateKeyMock.
+      if (importPath === "privkey") {
+        await commitPrivateKeyMock(importPrivKey.trim(), pw1);
+      } else {
+        await commitWalletMock(seed.join(" "), pw1);
+      }
       setPwMsg("ENCRYPTED & SAVED LOCALLY");
  // Capture the password before wiping it from React state — onDone
  // forwards it up to App so the session is auto-unlocked. After
@@ -15152,6 +15259,7 @@ function OnboardModal({ onDone, onClose }) {
       const committedPw = pw1;
  // Wipe sensitive state from React tree before handing off.
       setSeed([]); setVerifyInputs({}); setPw1(""); setPw2("");
+      setImportWords(Array(12).fill("")); setImportPrivKey(""); setImportPath(null);
       setTimeout(() => onDone(committedPw), 800);
     } catch (e) {
       setPwMsg(e?.message ?? String(e));
@@ -15456,59 +15564,153 @@ function OnboardModal({ onDone, onClose }) {
 
         {step === 1 && mode === "import" && (
           <>
-            {/* Import surface — paste 12 or 24 BIP39 words. Validates
-                the checksum + wordlist via @scure/bip39, then
-                previews the derived bc1q address as a sanity check
-                before commit. The bc1q guard enforces that we only
-                accept BIP84 native-SegWit wallets (matches the
-                rest of the protocol; legacy 1... and SegWit-wrap
-                3... addresses would silently land at a different
-                derivation than the user expected). */}
+            {/* Import surface — 12-cell mnemonic grid OR single
+                private-key input. Mutually exclusive: typing in
+                either disables the other. After validation +
+                bc1q check, jumps to step 4 (SET PASSWORD). */}
             <p style={{
-              fontSize: 14,
-              lineHeight: 1.7,
-              color: "var(--hxm-text)",
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: "var(--hxm-text-dim)",
               margin: 0,
               letterSpacing: "0.01em",
             }}>
-              Paste your <b style={{ color: "var(--hxm-gold-bright)" }}>12 or 24-word
-              BIP39 seed phrase</b> separated by spaces. The phrase is processed
-              entirely on this device — it never touches the network.
+              Fill in your <b style={{ color: "var(--hxm-gold-bright)" }}>BIP39 seed phrase</b> below,
+              OR paste a <b style={{ color: "var(--hxm-gold-bright)" }}>raw private key</b> (WIF or
+              64-char hex). Both processed entirely on this device.
             </p>
 
-            <textarea
-              autoFocus
-              value={importText}
-              onChange={(e) => { setImportText(e.target.value); setImportMsg(""); setImportAddr(""); }}
-              placeholder="word1 word2 word3 ... word12"
-              spellCheck={false}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              className="hxm-mono"
-              style={{
-                marginTop: 14,
-                width: "100%",
-                minHeight: 96,
-                padding: "12px 14px",
-                background: "rgba(0,0,0,0.55)",
-                border: "1px solid var(--hxm-line-2)",
-                borderRadius: 4,
-                color: "var(--hxm-text)",
-                fontSize: 13,
-                lineHeight: 1.6,
-                outline: "none",
-                resize: "vertical",
-                fontFamily: "'JetBrains Mono', monospace",
-              }}
-            />
+            {/* 12-cell mnemonic grid — 3 cols x 4 rows, matches the
+                BACKUP step's display layout for visual symmetry.
+                Each cell auto-advances to the next on space.
+                Pasting "word1 word2 ..." into any cell fans the
+                words out across the following cells. */}
+            <div style={{
+              marginTop: 14,
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 8,
+              opacity: hasPrivKey ? 0.4 : 1,
+              pointerEvents: hasPrivKey ? "none" : "auto",
+              transition: "opacity 150ms",
+            }}>
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div key={i} style={{
+                  position: "relative",
+                  border: `1px solid ${importWords[i] ? "var(--hxm-gold-dim)" : "var(--hxm-line-2)"}`,
+                  background: "rgba(0,0,0,0.55)",
+                  borderRadius: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "6px 10px",
+                  gap: 8,
+                }}>
+                  <span className="hxm-mono" style={{
+                    color: "var(--hxm-text-mute)",
+                    fontSize: 10,
+                    flexShrink: 0,
+                    width: 16,
+                  }}>
+                    {(i + 1).toString().padStart(2, "0")}
+                  </span>
+                  <input
+                    ref={(el) => { wordRefs.current[i] = el; }}
+                    value={importWords[i] || ""}
+                    onChange={(e) => setWordAt(i, e.target.value)}
+                    onPaste={(e) => onWordPaste(i, e)}
+                    onKeyDown={(e) => {
+                      if (e.key === " " && importWords[i]) {
+                        e.preventDefault();
+                        if (i < 11) wordRefs.current[i + 1]?.focus();
+                      } else if (e.key === "Backspace" && !importWords[i] && i > 0) {
+                        wordRefs.current[i - 1]?.focus();
+                      }
+                    }}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    disabled={hasPrivKey}
+                    className="hxm-mono"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      background: "transparent",
+                      border: "none",
+                      outline: "none",
+                      color: "var(--hxm-gold-bright)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      padding: 0,
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* OR divider — keeps the two input surfaces visually
+                separated so the user doesn't conflate them. */}
+            <div style={{
+              marginTop: 14,
+              marginBottom: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}>
+              <div style={{ flex: 1, height: 1, background: "var(--hxm-line)" }} />
+              <div className="hxm-bebas" style={{
+                fontSize: 10,
+                color: "var(--hxm-text-mute)",
+                letterSpacing: "0.3em",
+              }}>OR</div>
+              <div style={{ flex: 1, height: 1, background: "var(--hxm-line)" }} />
+            </div>
+
+            {/* Private-key input row. Disabled when the mnemonic
+                grid has any content (mutual exclusion). */}
+            <div style={{
+              border: `1px solid ${importPrivKey ? "var(--hxm-gold-dim)" : "var(--hxm-line-2)"}`,
+              background: "rgba(0,0,0,0.55)",
+              borderRadius: 4,
+              padding: "8px 12px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              opacity: hasAnyWord ? 0.4 : 1,
+              pointerEvents: hasAnyWord ? "none" : "auto",
+              transition: "opacity 150ms",
+            }}>
+              <KeyRound size={13} color="var(--hxm-text-mute)" style={{ flexShrink: 0 }} />
+              <input
+                value={importPrivKey}
+                onChange={(e) => { setImportPrivKey(e.target.value); setImportMsg(""); setImportAddr(""); }}
+                placeholder="Private key (WIF: KxA1... / L1zG... or 64-char hex)"
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                disabled={hasAnyWord}
+                className="hxm-mono"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  color: "var(--hxm-gold-bright)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  padding: 0,
+                }}
+              />
+            </div>
 
             {/* Status row — either an error msg (red) or the
                 derived bc1q address preview (gold). */}
             {importMsg && (
               <div className="hxm-mono" style={{
                 marginTop: 10,
-                fontSize: 11.5,
+                fontSize: 11,
                 color: "var(--hxm-red)",
                 lineHeight: 1.55,
               }}>
@@ -15526,29 +15728,28 @@ function OnboardModal({ onDone, onClose }) {
               </div>
             )}
 
-            {/* Amber callout: bc1q-only restriction + phishing reminder. */}
+            {/* Amber callout: bc1q-only restriction. */}
             <div style={{
-              marginTop: 16,
+              marginTop: 14,
               display: "flex",
               gap: 12,
-              padding: "12px 14px",
+              padding: "10px 12px",
               border: "1px solid rgba(245, 220, 137, 0.32)",
               borderLeft: "3px solid var(--hxm-amber)",
               background: "linear-gradient(180deg, rgba(245, 220, 137, 0.06) 0%, rgba(212, 162, 58, 0.03) 100%)",
               borderRadius: 3,
             }}>
-              <div style={{ flexShrink: 0, color: "var(--hxm-amber)", fontSize: 16, lineHeight: 1 }}>⚠</div>
-              <div style={{ fontSize: 11.5, lineHeight: 1.6, color: "var(--hxm-text-dim)" }}>
-                Only <b style={{ color: "var(--hxm-amber)" }}>bc1q (BIP84 native SegWit)</b> wallets
-                are accepted. If your existing wallet uses legacy (<code>1…</code>) or wrapped-SegWit
-                (<code>3…</code>) addresses, the funds at THOSE addresses will not appear here —
-                only the <code>bc1q…</code> derivation of the same seed. Private-key import is
-                planned for a future release.
+              <div style={{ flexShrink: 0, color: "var(--hxm-amber)", fontSize: 14, lineHeight: 1 }}>⚠</div>
+              <div style={{ fontSize: 11, lineHeight: 1.55, color: "var(--hxm-text-dim)" }}>
+                Only <b style={{ color: "var(--hxm-amber)" }}>bc1q (BIP84 native SegWit)</b> addresses
+                are supported. Funds at legacy (<code>1…</code>) or wrapped-SegWit (<code>3…</code>)
+                addresses derived from the same seed will not appear here — only the
+                <code> bc1q…</code> derivation.
               </div>
             </div>
 
             <div style={{
-              marginTop: 22,
+              marginTop: 16,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -15556,22 +15757,29 @@ function OnboardModal({ onDone, onClose }) {
             }}>
               <button
                 className="btx-btn-primary"
-                onClick={importMnemonic}
-                disabled={busy || !importText.trim()}
+                onClick={submitImport}
+                disabled={busy || (!hasAnyWord && !hasPrivKey)}
                 style={{
                   width: "100%",
                   padding: "13px 28px",
                   fontSize: 14,
                   letterSpacing: "0.22em",
-                  opacity: busy || !importText.trim() ? 0.5 : 1,
-                  cursor: busy || !importText.trim() ? "not-allowed" : "pointer",
+                  opacity: busy || (!hasAnyWord && !hasPrivKey) ? 0.5 : 1,
+                  cursor: busy || (!hasAnyWord && !hasPrivKey) ? "not-allowed" : "pointer",
                 }}
               >
                 {busy ? "VALIDATING..." : "VALIDATE & CONTINUE →"}
               </button>
               <button
                 className="btx-btn-ghost"
-                onClick={() => { setMode(""); setImportText(""); setImportMsg(""); setImportAddr(""); }}
+                onClick={() => {
+                  setMode("");
+                  setImportWords(Array(12).fill(""));
+                  setImportPrivKey("");
+                  setImportMsg("");
+                  setImportAddr("");
+                  setImportPath(null);
+                }}
                 disabled={busy}
                 style={{
                   width: "100%",

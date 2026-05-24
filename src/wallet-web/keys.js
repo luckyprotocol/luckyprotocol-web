@@ -20,6 +20,9 @@ import { generateMnemonic as _bip39Generate, validateMnemonic as _bip39Validate,
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { HDKey } from "@scure/bip32";
 import * as btc from "@scure/btc-signer";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { base58check } from "@scure/base";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 // Mnemonic strength in bits. 128 → 12 words (matches desktop build).
 const MNEMONIC_BITS = 128;
@@ -93,4 +96,119 @@ export async function mnemonicToAddress(mnemonic) {
   const seed = await mnemonicToSeed(mnemonic);
   const { publicKey } = deriveBip84(seed);
   return deriveAddress(publicKey);
+}
+
+// ============================================================================
+// Raw private key support (for the "import existing wallet" priv-key path)
+// ============================================================================
+
+const HEX_RE = /^[0-9a-fA-F]{64}$/;
+
+/**
+ * Decode hex string to Uint8Array. Internal helper; throws on bad hex.
+ */
+function hexToBytes(hex) {
+  if (!HEX_RE.test(hex)) throw new Error("expected 64-char hex string");
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/**
+ * Encode Uint8Array → lowercase hex. Used to serialize the priv key
+ * back into the encrypted-blob plaintext on commit.
+ */
+export function bytesToHex(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) {
+    s += bytes[i].toString(16).padStart(2, "0");
+  }
+  return s;
+}
+
+/**
+ * Parse a Bitcoin private key in WIF (Wallet Import Format) or raw
+ * 64-char hex. Returns a 32-byte Uint8Array. Throws if the input is
+ * malformed, has the wrong network byte (mainnet only — 0x80), or
+ * doesn't pass secp256k1's scalar bounds check.
+ *
+ * WIF format (mainnet):
+ *   base58check([0x80, ...privKey32, 0x01_if_compressed])
+ *
+ * We accept both compressed (52 chars, starts K/L) and uncompressed
+ * (51 chars, starts 5) — internally the private key is the same 32
+ * bytes; only the pubkey-derivation flag differs. Since LUCKYPROTOCOL
+ * uses P2WPKH which REQUIRES compressed pubkeys (BIP141), we always
+ * derive a compressed pubkey downstream regardless of the WIF's
+ * compressed flag. An uncompressed-WIF user wanting their old
+ * legacy/uncompressed address back would not get the same address
+ * here — that's intentional, we only support bc1q (P2WPKH).
+ */
+export function parsePrivateKey(input) {
+  const s = String(input || "").trim();
+  if (!s) throw new Error("private key required");
+
+  // Raw hex path (64 lowercase/uppercase chars).
+  if (HEX_RE.test(s)) {
+    const bytes = hexToBytes(s.toLowerCase());
+    if (!secp256k1.utils.isValidPrivateKey(bytes)) {
+      throw new Error("invalid secp256k1 private key (out of curve order)");
+    }
+    return bytes;
+  }
+
+  // WIF path. base58check decodes the version+payload+checksum blob.
+  let decoded;
+  try {
+    decoded = base58check(sha256).decode(s);
+  } catch {
+    throw new Error("not a valid WIF or 64-char hex private key");
+  }
+  if (decoded.length !== 33 && decoded.length !== 34) {
+    throw new Error(`WIF wrong length (${decoded.length} bytes; expected 33 or 34)`);
+  }
+  if (decoded[0] !== 0x80) {
+    throw new Error(`WIF wrong network prefix (0x${decoded[0].toString(16)}; expected 0x80 mainnet)`);
+  }
+  const priv = decoded.slice(1, 33);
+  // Optional trailing 0x01 = compressed pubkey flag. We accept both;
+  // see the docstring for why we always emit compressed downstream.
+  if (decoded.length === 34 && decoded[33] !== 0x01) {
+    throw new Error(`WIF trailing byte 0x${decoded[33].toString(16)} unrecognized (expected 0x01 for compressed)`);
+  }
+  if (!secp256k1.utils.isValidPrivateKey(priv)) {
+    throw new Error("invalid secp256k1 private key (out of curve order)");
+  }
+  return priv;
+}
+
+/**
+ * Derive the BIP84 P2WPKH (bc1q) address for a raw 32-byte private
+ * key. Used by the import-priv-key flow to preview the address
+ * before commit, AND inside unlockSession when the stored blob is
+ * a priv-key wallet (no mnemonic to BIP32-derive from).
+ */
+export function privateKeyToAddress(privKeyBytes) {
+  if (!(privKeyBytes instanceof Uint8Array) || privKeyBytes.length !== 32) {
+    throw new Error(`expected 32-byte private key, got ${privKeyBytes?.length}`);
+  }
+  const pubKey = secp256k1.getPublicKey(privKeyBytes, true); // compressed
+  return deriveAddress(pubKey);
+}
+
+/**
+ * Compute both the address AND the pubkey for a raw priv key. The
+ * session-cache code path needs both (address for receive UI;
+ * pubkey for tx-signing). Returns { address, publicKey } where
+ * publicKey is the 33-byte compressed form.
+ */
+export function privateKeyToKeypair(privKeyBytes) {
+  if (!(privKeyBytes instanceof Uint8Array) || privKeyBytes.length !== 32) {
+    throw new Error(`expected 32-byte private key, got ${privKeyBytes?.length}`);
+  }
+  const publicKey = secp256k1.getPublicKey(privKeyBytes, true);
+  const address = deriveAddress(publicKey);
+  return { address, publicKey };
 }
