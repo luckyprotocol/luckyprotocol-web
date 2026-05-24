@@ -7698,21 +7698,37 @@ function CasinoCss() {
           grid-template-columns: repeat(2, 1fr) !important;
         }
 
-        /* Body becomes column too — center on top, right sidebar
-           below as a stacked section. Both grow naturally with
-           their content; the outer page scrolls. */
-        .hxm-body { flex-direction: column; }
+        /* Body grows naturally with its content; the outer page
+           scrolls. flex:1 + min-height:0 (the desktop pattern,
+           pinned to viewport) is dropped on mobile — it was causing
+           the footer to render past the bottom of the visible
+           viewport because the body kept claiming "I am flex:1, fill
+           the parent" even when content overflowed.
+           viewport gets the same treatment (drop the flex:1 pin)
+           so the topbar + body + footer stack vertically at their
+           natural heights and the page scrolls. */
+        .hxm-viewport {
+          flex: 0 0 auto;
+          min-height: 0;
+        }
+        .hxm-body {
+          flex: 0 0 auto;
+          flex-direction: column;
+          min-height: 0;
+        }
         .hxm-center {
-          padding: 8px 10px 0;
+          flex: 0 0 auto;
+          padding: 8px 10px 12px;
           overflow-y: visible;
+          min-height: auto;
         }
-        .hxm-sidebar-right {
-          width: 100%;
-          padding: 12px 10px 16px;
-          overflow-y: visible;
-          border-top: 1px solid var(--hxm-line);
-          margin-top: 12px;
-        }
+        /* Hide the right sidebar entirely on mobile — per user
+           request the MINE TARGET / AI COPILOT / WALLET-UTXO panels
+           don't earn their vertical space on a narrow viewport. The
+           MINE-target picker is still reachable via the INDEX nav,
+           and the wallet summary lives in WALLET. AI COPILOT is a
+           COMING SOON placeholder anyway. */
+        .hxm-sidebar-right { display: none; }
 
         /* Topbar: 6 tiles in 3 cols × 2 rows. Borders rewire so the
            grid lines feel intentional. */
