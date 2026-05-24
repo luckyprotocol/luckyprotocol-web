@@ -6345,17 +6345,26 @@ function CasinoCss() {
         width: 0; height: 0;
         z-index: 5;
         transform-origin: center center;
-        /* easeOutSine — the gentlest standard ease-out. User asked
-           "再慢一点" so we drop another curve tier:
-             Quart   (0.165, 0.84, 0.44, 1)   — original, too sharp
-             Cubic   (0.215, 0.61, 0.355, 1)  — previous attempt
-             Sine    (0.39, 0.575, 0.565, 1)  — current, most gentle
-           Sine's launch is the closest to linear among the
-           standard ease-outs — peak speed at start ≈ 1.57x average,
-           vs Cubic ~2.0x, Quart ~2.5x. Combined with the rotation
-           reduction (8 -> 5), the visible launch is now ~3x slower
-           than the original 12-rotation Quart setup. */
-        transition: transform 6s cubic-bezier(0.39, 0.575, 0.565, 1);
+        /* Custom "tail-heavy" curve — user wants 越来越慢越来越慢,
+           最后竖直落进去. Standard easeOutSine had too-uniform a
+           deceleration; the end was still moving noticeably when
+           the ball was supposed to be dropping vertically into the
+           pocket.
+           cubic-bezier(0.25, 0.85, 0.3, 1) profile:
+             t=0.10  -> ~28% progress  (gentle but visible launch)
+             t=0.30  -> ~67%           (clearly decelerating)
+             t=0.50  -> ~85%           (mostly there)
+             t=0.78  -> ~98%           (nearly stopped — DROP BEGINS)
+             t=1.00  -> 100%
+           At the t=0.78 mark when the ball-drop keyframe takes
+           over, the orbit's residual velocity is ~3% of peak —
+           horizontal motion is basically nil. The vertical drop
+           appears straight down because there's no horizontal
+           component still spinning.
+           Combined with 3 rotations (down from 12 original), the
+           absolute peak speed is now ~430 deg/sec vs ~1440 at
+           launch in the original — 3.3× slower. */
+        transition: transform 6s cubic-bezier(0.25, 0.85, 0.3, 1);
       }
  /* Polished steel ball — three resting positions driven by phase:
            - on the OUTER TRACK at translateY(-198px) while spinning
@@ -13552,12 +13561,14 @@ function BronzeRoom({ state, submitMine, settle, settling, lastResult, goRoom, g
       if (delta > 0) delta -= 360;
       return prev + delta - 360 * 8;
     });
- // Ball orbit further reduced 8 -> 5 rotations (user asked for
- // even slower). 5 rotations / 6s = 300 deg/sec avg vs 720 deg/sec
- // in the original. Direction stays positive (opposite to wheel)
- // so the "ball one way, wheel the other" visual is preserved
- // even at this slower pace.
-    setBallAngle((prev) => prev + 360 * 5);
+ // Ball orbit further reduced 5 -> 3 rotations. User wants the
+ // tail end to be near-stopped before the vertical drop. With
+ // 3 orbits over 6s the absolute pace drops to 180 deg/sec
+ // average; combined with the tail-heavy curve below, the LAST
+ // 1.5 seconds the ball is moving at <30 deg/sec — visibly
+ // "winding down" rather than still racing. Direction stays
+ // positive (opposite to wheel's negative rotation).
+    setBallAngle((prev) => prev + 360 * 3);
     sfxLever();
     // Tick / drop / settle timings scaled to the new 6s wheel
     // duration (was 7s) so audio + state transitions stay in sync
