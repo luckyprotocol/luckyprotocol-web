@@ -7860,73 +7860,140 @@ function CasinoCss() {
         }
       }
 
-      /* Landscape-phone breakpoint — catches phones held sideways
-         whose width exceeds the 900px breakpoint above (iPhone 12
-         Pro Max landscape is 926, 14 Pro Max is 932, Galaxy S22
-         Ultra is 915 — all > 900). max-height: 600 bumped from 500
-         to catch any landscape with limited vertical room — still
-         safely excludes tablets (iPad mini landscape is 768 tall,
-         iPad Pro 11" is 834).
+      /* Landscape-phone breakpoint — fully self-contained so it
+         works at any viewport width. iPhone 14 Pro Max landscape
+         is 932 wide which exceeds the 900px portrait-mobile rule,
+         so we can't rely on those rules firing here. Replicate
+         the bits we need (hamburger drawer, sidebar hidden,
+         column-stack) PLUS landscape-specific tightening (no
+         topbar, thin hero, compressed game cards) so the entire
+         dashboard fits one viewport with no scroll.
 
-         Goal in this block: make the dashboard fit in ONE landscape
-         viewport with no scroll. Banner stretches full width across
-         the top, 4 GameCards squeeze into a single row below, right
-         sidebar removed entirely. */
+         max-height: 600 catches all common phone landscape
+         (iPhone Pro Max ~430, Galaxy S22 Ultra ~412) and safely
+         excludes tablets (iPad mini landscape ~768, iPad Pro 11"
+         ~834). */
       @media (orientation: landscape) and (max-height: 600px) {
-        /* Right sidebar gone — per user request, the MINE TARGET /
-           AI COPILOT / WALLET-UTXO panels don't fit landscape. */
+        /* Page-level flow: stack column, let the page grow naturally
+           (no 100vh pinning). */
+        html, body, #root { height: auto; min-height: 100%; }
+        .hxm-app {
+          flex-direction: column;
+          height: auto;
+          min-height: 100vh;
+          min-height: 100dvh;
+        }
+
+        /* Left sidebar becomes a slide-in drawer (same pattern as
+           portrait mobile). Hamburger reveals it; backdrop dims +
+           closes on tap. Without this, the desktop full-vertical
+           sidebar eats ~156px of horizontal space — at 932w that
+           leaves only 776 for content. */
+        .hxm-sidebar-left {
+          position: fixed; top: 0; left: 0; z-index: 99;
+          width: min(260px, 78vw);
+          height: 100vh; height: 100dvh;
+          flex-direction: column;
+          overflow-y: auto; overflow-x: hidden;
+          padding: 14px 12px;
+          gap: 8px;
+          border-right: 1px solid var(--hxm-line);
+          border-bottom: none;
+          transform: translateX(-100%);
+          transition: transform 220ms cubic-bezier(.16,.84,.36,1);
+          box-shadow: 6px 0 24px rgba(0,0,0,0.55);
+        }
+        .hxm-sidebar-left.hxm-sidebar-left--mobile-open {
+          transform: translateX(0);
+        }
+        .hxm-mobile-nav-toggle {
+          display: inline-flex;
+          position: fixed; top: 8px; left: 8px; z-index: 100;
+          width: 38px; height: 38px;
+          align-items: center; justify-content: center;
+          background: rgba(28, 12, 12, 0.92);
+          border: 1px solid var(--hxm-line-2);
+          border-radius: 7px;
+          color: var(--hxm-gold-bright);
+          cursor: pointer; padding: 0;
+          box-shadow: 0 4px 14px rgba(0,0,0,0.55);
+        }
+        .hxm-mobile-nav-backdrop {
+          display: block;
+          position: fixed; inset: 0; z-index: 98;
+          background: rgba(0, 0, 0, 0.55);
+          backdrop-filter: blur(2px);
+        }
+
+        /* Hide topbar entirely — saves ~75px vertical for the
+           short landscape viewport. The same data is visible in
+           SETTINGS / WALLET / INDEX when the user actually needs
+           it. */
+        .hxm-topbar { display: none; }
+
+        /* Right sidebar gone (kept from previous commit). */
         .hxm-sidebar-right { display: none; }
 
-        /* Banner stretches the full width but flattens vertically
-           (the 2.5:1 source image still fills with object-fit:cover
-           cropping; the flatter frame just shows a narrower
-           horizontal slice). minHeight floor drops from 200 to 80
-           so the banner takes a single strip across the top
-           instead of soaking up the dashboard column. */
+        /* Body grows naturally; no flex:1 pin (caused the bottom-
+           cutoff issue seen earlier on portrait mobile). */
+        .hxm-viewport { flex: 0 0 auto; min-height: 0; }
+        .hxm-body { flex: 0 0 auto; flex-direction: column; min-height: 0; }
+        .hxm-center {
+          flex: 0 0 auto;
+          padding: 8px 10px 12px;
+          overflow-y: visible;
+          overflow-x: auto;
+        }
+
+        /* Hero banner — thin horizontal strip across the top.
+           Compressed from min 200 / flex:1 (desktop) to a tight
+           60-90px band. object-fit: cover on the inner <img> crops
+           to the new aspect. */
         .hxm-hero {
           flex: 0 0 auto !important;
-          min-height: 80px !important;
-          max-height: 120px;
+          min-height: 60px !important;
+          max-height: 90px;
         }
 
-        /* 4 GameCards in a single row below the banner. Override
-           the inline desktop default (already 4 cols) AND the
-           portrait-mobile override (2 cols) — we want one wide row
-           in landscape regardless of width. */
+        /* 4 GameCards in a single row. Override both the inline
+           desktop default (4 cols) and the portrait-mobile rule
+           (2 cols) — landscape always wants one wide row. */
         .hxm-room-grid {
           grid-template-columns: repeat(4, 1fr) !important;
-          gap: 8px !important;
-          margin-top: 10px !important;
+          gap: 6px !important;
+          margin-top: 8px !important;
         }
 
-        /* Tighten each GameCard so 4 fit horizontally and the row
-           total height stays under the remaining viewport budget
-           (~260px after banner + topbar + footer + .hxm-center
-           paddings). Card preview image (170px hardcoded inline)
-           shrinks to 100, title fontsize from 30 to 20, paddings
-           tighten. */
+        /* Compress each GameCard: smaller paddings, shorter
+           preview thumbnail, smaller tier title — so 4 fit
+           horizontally inside whatever viewport width we have
+           and the row total height stays well under the
+           remaining ~270px of vertical budget. */
         .hxm-room-grid > .hxm-bordered {
-          padding: 10px 8px !important;
+          padding: 8px 6px !important;
           border-radius: 8px;
         }
         .hxm-room-grid .hxm-cinzel.metal-iron,
         .hxm-room-grid .hxm-cinzel.metal-bronze,
         .hxm-room-grid .hxm-cinzel.metal-silver,
         .hxm-room-grid .hxm-cinzel.metal-gold {
-          font-size: 18px !important;
+          font-size: 16px !important;
         }
         .hxm-room-grid > .hxm-bordered > div:nth-child(2) {
-          /* The "image preview" div is the 2nd child (after the title
-             block) with height: 170 inline. Squeeze it. */
-          height: 100px !important;
-          margin-bottom: 6px !important;
+          /* "image preview" div is the 2nd child (after the title)
+             with height: 170 inline. Squeeze hard. */
+          height: 70px !important;
+          margin-bottom: 4px !important;
         }
 
-        /* Topbar pads-left already 54px from the hamburger clearance,
-           keep it. But the hamburger isn't ideal in landscape — the
-           user can already see everything in one shot. Leave as-is
-           for now (the menu still works); revisit if we need to
-           reclaim those 54px. */
+        /* Modal cards full-width on landscape phone too. */
+        .btx-modal-blocker { padding: 8px; }
+        .btx-modal-card {
+          max-width: 100% !important;
+          width: 100% !important;
+          padding: 16px 12px !important;
+          min-height: auto !important;
+        }
       }
     `), null)}</>
   );
