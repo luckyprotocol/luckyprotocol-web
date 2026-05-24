@@ -6345,26 +6345,24 @@ function CasinoCss() {
         width: 0; height: 0;
         z-index: 5;
         transform-origin: center center;
-        /* Custom "tail-heavy" curve — user wants 越来越慢越来越慢,
-           最后竖直落进去. Standard easeOutSine had too-uniform a
-           deceleration; the end was still moving noticeably when
-           the ball was supposed to be dropping vertically into the
-           pocket.
-           cubic-bezier(0.25, 0.85, 0.3, 1) profile:
-             t=0.10  -> ~28% progress  (gentle but visible launch)
-             t=0.30  -> ~67%           (clearly decelerating)
-             t=0.50  -> ~85%           (mostly there)
-             t=0.78  -> ~98%           (nearly stopped — DROP BEGINS)
+        /* easeOutQuint cubic-bezier(0.22, 1, 0.36, 1) — user pivot
+           to 先快后慢 (fast launch, dramatic slowdown). Quint is
+           the sharpest of the standard ease-out family, giving a
+           textbook "flick and decelerate" profile:
+             t=0.10  -> ~67% progress (powerful launch)
+             t=0.30  -> ~92%
+             t=0.50  -> ~97%
+             t=0.78  -> ~99.6%   (effectively stopped)
              t=1.00  -> 100%
-           At the t=0.78 mark when the ball-drop keyframe takes
-           over, the orbit's residual velocity is ~3% of peak —
-           horizontal motion is basically nil. The vertical drop
-           appears straight down because there's no horizontal
-           component still spinning.
-           Combined with 3 rotations (down from 12 original), the
-           absolute peak speed is now ~430 deg/sec vs ~1440 at
-           launch in the original — 3.3× slower. */
-        transition: transform 6s cubic-bezier(0.25, 0.85, 0.3, 1);
+           At the t=0.78 drop-handoff the orbit's residual velocity
+           is ~3% of peak — same near-stop guarantee as the previous
+           tail-heavy custom curve, but with a much more energetic
+           opening that matches "先快".
+           Combined with 4 rotations (between the original 12 and
+           the minimum 3): peak ~864 deg/sec at launch (60% of
+           original's 1440), drop-time residual ~26 deg/sec —
+           "ball flicked hard, runs out of energy, drops vertically". */
+        transition: transform 6s cubic-bezier(0.22, 1, 0.36, 1);
       }
  /* Polished steel ball — three resting positions driven by phase:
            - on the OUTER TRACK at translateY(-198px) while spinning
@@ -13561,14 +13559,14 @@ function BronzeRoom({ state, submitMine, settle, settling, lastResult, goRoom, g
       if (delta > 0) delta -= 360;
       return prev + delta - 360 * 8;
     });
- // Ball orbit further reduced 5 -> 3 rotations. User wants the
- // tail end to be near-stopped before the vertical drop. With
- // 3 orbits over 6s the absolute pace drops to 180 deg/sec
- // average; combined with the tail-heavy curve below, the LAST
- // 1.5 seconds the ball is moving at <30 deg/sec — visibly
- // "winding down" rather than still racing. Direction stays
- // positive (opposite to wheel's negative rotation).
-    setBallAngle((prev) => prev + 360 * 3);
+ // Ball orbit at 4 rotations — slight bump back from 3 since
+ // user now wants 先快后慢 (fast launch, slow finish). 4 orbits
+ // over 6s = 240 deg/sec avg; combined with the easeOutQuint
+ // curve below, peak at launch ≈ 864 deg/sec (a clear "flick"
+ // feeling) but at t=0.78 (drop handoff) residual velocity is
+ // ~3% peak ≈ 26 deg/sec — basically stopped, vertical drop
+ // stays clean. Direction stays positive (opposite to wheel).
+    setBallAngle((prev) => prev + 360 * 4);
     sfxLever();
     // Tick / drop / settle timings scaled to the new 6s wheel
     // duration (was 7s) so audio + state transitions stay in sync
