@@ -9668,26 +9668,24 @@ function Toast({ kind, msg, onClose }) {
 // =============================================================================
 function Dashboard({ state, goRoom, settle, settling, locked, onLockedClick }) {
  // Wrap in .btx-screen so Dashboard inherits the same max-width / margin
- // / min-height bounds as Settings/Wallet/Deploy/Transfer/UTXO. Hero
- // stretches to consume whatever vertical space the GameCard row
- // doesn't use, so the layout always fills the viewport — but the
- // GameCards stay at a fixed compact size so the roulette / dice /
- // slot previews don't get blown up into pixelated giants when the
- // window is tall. At 1280×800 this gives Hero ≈ 280px, cards ≈ 400px.
+ // bounds as Settings/Wallet/Deploy/Transfer/UTXO. Hero now uses a
+ // fixed 2.5:1 aspect-ratio so the banner shows fully; GameCards take
+ // their natural compact height. No more flex-grow shenanigans — the
+ // column is the sum of (hero + gap + cards), the page scrolls if
+ // that exceeds the viewport. This fixes the user-reported "banner
+ // is cropped" and "empty space below cards" issues — the former
+ // caused by hero soaking up all remaining height (then aggressively
+ // cropping), the latter by GameCard's height:100% stretching past
+ // its natural footprint and exposing the marginTop:auto gap.
   return (
-    <div className="btx-screen" style={{
-      display: "flex",
-      flexDirection: "column",
-      height: "100%",
-      minHeight: 0,
-    }}>
+    <div className="btx-screen">
       <DashboardHero />
 
       <div className="hxm-room-grid" style={{
         display: "grid",
         gridTemplateColumns: "repeat(4, 1fr)",
         gap: 14,
-        marginTop: 18,
+        marginTop: 14,
       }}>
         {Object.values(TIERS).map((T) => (
           <GameCard
@@ -10667,11 +10665,16 @@ function DashboardHero() {
       border: "1px solid var(--hxm-line-2)",
       boxShadow: "0 8px 30px -8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(212,162,58,0.18)",
       lineHeight: 0,
-      // Flex-grow inside the Dashboard column: GameCards sit at their
-      // natural compact height (~400px); Hero soaks up the rest of the
-      // viewport. minHeight floors it at 200.
-      flex: 1,
-      minHeight: 200,
+      width: "100%",
+      // Maintain the banner's native 2.5:1 aspect so the entire image
+      // shows — slot machine + chips + callout strip at the bottom no
+      // longer get cropped. Was `flex: 1 + minHeight: 200` which let
+      // the container be whatever vertical space the dashboard column
+      // had left, plus `object-fit: cover + objectPosition: center
+      // top` which then aggressively cropped the bottom. User reported
+      // banner appeared incomplete; aspect-ratio + cover fixes that
+      // (cover still applies to handle any sub-pixel rounding).
+      aspectRatio: "2.5 / 1",
     }}>
       <img
         src={BRAND_BANNER_SRC}
@@ -10680,20 +10683,12 @@ function DashboardHero() {
           width: "100%",
           height: "100%",
           display: "block",
-          // cover = fill the whole frame edge-to-edge, cropping
-          // whichever dimension is in excess. The banner is 1983×793
-          // (≈ 2.5:1). At wider Dashboard windows the frame is more
-          // square than the image, so cover scales to fit width and
-          // crops VERTICALLY. We anchor the image's TOP at the frame's
-          // top — that preserves the curtain + sparkles strip above
-          // the LUCKY MINER wordmark, giving it visible breathing
-          // room instead of butting straight against the frame edge.
-          // (The cost is the bottom-most feature-callout strip
-          // gets trimmed at very wide frame aspects — acceptable
-          // trade since the slot machine + chips remain the visual
-          // anchor of the banner.)
+          // With aspect-ratio on the container matching the source's
+          // 2.5:1, cover/contain are equivalent — the image just fills
+          // the box. Keeping cover for sub-pixel safety. Object-position
+          // dropped from "center top" → default "center center" since
+          // there's no cropping to anchor.
           objectFit: "cover",
-          objectPosition: "center top",
         }}
         draggable={false}
       />
@@ -10720,11 +10715,16 @@ function GameCard({ tier, state, onPlay, locked }) {
   const Preview = tier.key === "iron" ? CardPreview : tier.key === "bronze" ? RoulettePreview : tier.key === "silver" ? DoubleDrawPreview : SlotPreview;
   return (
     <div className="hxm-bordered" style={{
-      padding: "18px 16px 16px",
+      padding: "14px 12px 14px",
       borderColor: "var(--hxm-line-2)",
       borderRadius: 10,
       display: "flex", flexDirection: "column",
-      height: "100%",
+      // height: 100% removed — was forcing each card to fill the
+      // grid row's max height, which combined with the CTA wrapper's
+      // marginTop:auto opened a big empty gap between the stats row
+      // and the MINE button. Cards now size to their natural content
+      // and all 4 align automatically because they have identical
+      // structure (title + preview + stats + CTA).
     }}>
       {/* Title block — ONLY the tier name uses its metal gradient (luxury accent) */}
       <div style={{ textAlign: "center", marginBottom: 12 }}>
