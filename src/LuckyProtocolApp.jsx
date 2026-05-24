@@ -898,7 +898,38 @@ const hasWallet = () => walletHasWallet();
 // mnemonic generation, real BIP84 bc1q derivation, real Argon2id+AES-GCM
 // encryption at rest live in the Rust crate (src-tauri/src/wallet.rs).
 const newMnemonicMock = async () => walletGenerateMnemonic();
-const commitWalletMock = async (mnemonic, password) => walletCommit(mnemonic, password);
+const commitWalletMock = async (mnemonic, password) => {
+  const out = await walletCommit(mnemonic, password);
+ // Persistent-storage upgrade — by default browsers treat
+ // IndexedDB / localStorage as "best-effort": under disk pressure
+ // (the user installs a huge app, or the OS runs low on space) the
+ // browser is free to evict the data WITHOUT warning. For a
+ // self-custody wallet that's a silent rug — the encrypted
+ // mnemonic disappears and the user can't unlock. Promote the
+ // origin's storage to "persistent" via the Storage API so the
+ // browser must explicitly ask the user before evicting. Called
+ // RIGHT after wallet commit because:
+ //   1. The user just made an explicit gesture (clicked "create
+ //      wallet"), so persist() won't be silently denied by browsers
+ //      that gate it on user activation (Firefox).
+ //   2. Chromium auto-grants persist() if the site is installed as
+ //      a PWA or has high engagement — fresh installs may show a
+ //      one-time prompt, which we accept on the user's behalf.
+ //   3. Wrapping in try/catch + ?. chain so Safari (which historically
+ //      didn't expose .persist() on all versions) silently no-ops.
+ // The actual user data lives in browser storage and survives every
+ // app deploy as long as the origin (lucky-protocol.xyz) and the
+ // luckyprotocol.wallet.v1 LS key are stable.
+  try {
+    if (navigator.storage && typeof navigator.storage.persist === "function") {
+      const already = await navigator.storage.persisted?.();
+      if (!already) await navigator.storage.persist();
+    }
+  } catch (e) {
+    console.warn("[wallet] persistent-storage request failed", e);
+  }
+  return out;
+};
 const exportMnemonicMock = async (password) => walletExport(password);
 const wipeWalletMock = async () => walletWipe();
 
@@ -14752,6 +14783,21 @@ function UnlockModal({ onUnlocked }) {
       // session); we need the in-memory cache here so subsequent
       // tx-signing ops don't re-derive on every click.
       await walletUnlockSession(pw);
+      // Opportunistic persistent-storage upgrade for users whose
+      // wallet predates the commitWalletMock auto-request. Same
+      // intent: tell the browser the encrypted mnemonic is
+      // user-precious and shouldn't be silently evicted under
+      // disk pressure. The unlock click itself is a strong user
+      // gesture, so persist() is virtually guaranteed to succeed
+      // here even on browsers that gate it on activation.
+      try {
+        if (navigator.storage && typeof navigator.storage.persist === "function") {
+          const already = await navigator.storage.persisted?.();
+          if (!already) await navigator.storage.persist();
+        }
+      } catch (e) {
+        console.warn("[unlock] persistent-storage request failed", e);
+      }
  // Fade out, then hand the password up. setTimeout matches the
  // CSS transition duration below (280ms).
       setMsg("");
