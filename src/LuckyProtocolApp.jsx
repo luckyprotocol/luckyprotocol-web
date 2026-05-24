@@ -10722,15 +10722,15 @@ function DashboardHero() {
       boxShadow: "0 8px 30px -8px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(212,162,58,0.18)",
       lineHeight: 0,
       width: "100%",
-      // Maintain the banner's native 2.5:1 aspect so the entire image
-      // shows — slot machine + chips + callout strip at the bottom no
-      // longer get cropped. Was `flex: 1 + minHeight: 200` which let
-      // the container be whatever vertical space the dashboard column
-      // had left, plus `object-fit: cover + objectPosition: center
-      // top` which then aggressively cropped the bottom. User reported
-      // banner appeared incomplete; aspect-ratio + cover fixes that
-      // (cover still applies to handle any sub-pixel rounding).
-      aspectRatio: "2.5 / 1",
+      // 2.8:1 (squatter than the source's native 2.5:1) so the dark
+      // strip at the bottom of the banner image — the empty black
+      // below the "POWERFUL MINING ENGINE / SECURE / STATS / EASY
+      // TO USE" feature row — gets cropped off. Anchored at the top
+      // via objectPosition so the crop happens at the bottom only;
+      // the slot machine + LUCKY PROTOCOL wordmark + feature row
+      // all stay visible. Also reduces the banner's vertical
+      // footprint by ~10%, moving the game cards naturally up.
+      aspectRatio: "2.8 / 1",
     }}>
       <img
         src={BRAND_BANNER_SRC}
@@ -10739,12 +10739,13 @@ function DashboardHero() {
           width: "100%",
           height: "100%",
           display: "block",
-          // With aspect-ratio on the container matching the source's
-          // 2.5:1, cover/contain are equivalent — the image just fills
-          // the box. Keeping cover for sub-pixel safety. Object-position
-          // dropped from "center top" → default "center center" since
-          // there's no cropping to anchor.
+          // Anchor at top so the bottom is the part cropped (the
+          // empty black strip below the feature callouts the user
+          // flagged). cover scales the image to fill the now-squatter
+          // 2.8:1 frame; top-anchor decides which axis edge gets
+          // sacrificed.
           objectFit: "cover",
+          objectPosition: "center top",
         }}
         draggable={false}
       />
