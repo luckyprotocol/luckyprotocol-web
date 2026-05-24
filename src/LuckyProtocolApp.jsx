@@ -7945,45 +7945,24 @@ function CasinoCss() {
           overflow-x: auto;
         }
 
-        /* Hero banner — thin horizontal strip across the top.
-           Compressed from min 200 / flex:1 (desktop) to a tight
-           60-90px band. object-fit: cover on the inner <img> crops
-           to the new aspect. */
-        .hxm-hero {
-          flex: 0 0 auto !important;
-          min-height: 60px !important;
-          max-height: 90px;
-        }
+        /* Hero banner — keep its 2.5:1 aspect-ratio so the full
+           banner shows. The page will scroll if the total height
+           (banner + cards) exceeds the landscape viewport — user
+           explicitly OK'd scrolling rather than aggressive
+           compression after the previous attempt clipped the
+           preview images out of their card containers. */
 
-        /* 4 GameCards in a single row. Override both the inline
-           desktop default (4 cols) and the portrait-mobile rule
-           (2 cols) — landscape always wants one wide row. */
+        /* 4 GameCards in a single row at natural size. Override
+           both the inline desktop default (4 cols, matches our
+           desire) and the portrait-mobile rule (2 cols). Cards
+           keep their natural padding + 170px preview slot — the
+           inner Preview components (CardPreview, RoulettePreview,
+           etc.) are hardcoded at 160x160 inline so any container
+           shrinkage would push them OUT of the card (the bug the
+           user reported as "穿模/clipping"). */
         .hxm-room-grid {
           grid-template-columns: repeat(4, 1fr) !important;
-          gap: 6px !important;
-          margin-top: 8px !important;
-        }
-
-        /* Compress each GameCard: smaller paddings, shorter
-           preview thumbnail, smaller tier title — so 4 fit
-           horizontally inside whatever viewport width we have
-           and the row total height stays well under the
-           remaining ~270px of vertical budget. */
-        .hxm-room-grid > .hxm-bordered {
-          padding: 8px 6px !important;
-          border-radius: 8px;
-        }
-        .hxm-room-grid .hxm-cinzel.metal-iron,
-        .hxm-room-grid .hxm-cinzel.metal-bronze,
-        .hxm-room-grid .hxm-cinzel.metal-silver,
-        .hxm-room-grid .hxm-cinzel.metal-gold {
-          font-size: 16px !important;
-        }
-        .hxm-room-grid > .hxm-bordered > div:nth-child(2) {
-          /* "image preview" div is the 2nd child (after the title)
-             with height: 170 inline. Squeeze hard. */
-          height: 70px !important;
-          margin-bottom: 4px !important;
+          gap: 12px !important;
         }
 
         /* Modal cards full-width on landscape phone too. */
