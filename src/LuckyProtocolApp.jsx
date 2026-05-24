@@ -13559,14 +13559,13 @@ function BronzeRoom({ state, submitMine, settle, settling, lastResult, goRoom, g
       if (delta > 0) delta -= 360;
       return prev + delta - 360 * 8;
     });
- // Ball orbit at 4 rotations — slight bump back from 3 since
- // user now wants 先快后慢 (fast launch, slow finish). 4 orbits
- // over 6s = 240 deg/sec avg; combined with the easeOutQuint
- // curve below, peak at launch ≈ 864 deg/sec (a clear "flick"
- // feeling) but at t=0.78 (drop handoff) residual velocity is
- // ~3% peak ≈ 26 deg/sec — basically stopped, vertical drop
- // stays clean. Direction stays positive (opposite to wheel).
-    setBallAngle((prev) => prev + 360 * 4);
+ // Ball orbit bumped 4 -> 6 rotations per user "再快点" follow-up.
+ // 6 orbits over 6s = 360 deg/sec avg; combined with easeOutQuint
+ // (peak/avg ~3.6x), peak at launch ≈ 1300 deg/sec — close to the
+ // original 1440 peak but with the tail-heavy curve so the drop-
+ // handoff residual is still <50 deg/sec (clean vertical drop).
+ // Direction stays positive (opposite to wheel's negative spin).
+    setBallAngle((prev) => prev + 360 * 6);
     sfxLever();
     // Tick / drop / settle timings scaled to the new 6s wheel
     // duration (was 7s) so audio + state transitions stay in sync
