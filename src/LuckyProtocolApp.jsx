@@ -7759,6 +7759,16 @@ function CasinoCss() {
           min-height: 36px;
         }
 
+        /* Footer — on mobile the version + trust-badges row
+           ("LUCKYPROTOCOL v0.1.0 · Secure · Provably Fair ·
+           On-Chain") was clipping past the right edge and hiding
+           the X icon + SOUND button. Per user request keep only
+           the X icon and SOUND toggle on mobile. Network badge
+           hidden too (not actionable, easy to find in SETTINGS). */
+        .hxm-footer-meta { display: none !important; }
+        .hxm-footer-network { display: none !important; }
+        .hxm-footer { justify-content: flex-end; padding: 6px 10px; }
+
         /* Body grows naturally with its content; the outer page
            scrolls. flex:1 + min-height:0 (the desktop pattern,
            pinned to viewport) is dropped on mobile — it was causing
@@ -7830,11 +7840,21 @@ function CasinoCss() {
          even tighter — topbar tiles drop to 2 cols, gold-rule fonts
          shrink further. */
       @media (max-width: 480px) {
+        /* Topbar 2x3 grid. Clean-slate the borders rather than
+           trying to incrementally override the 3-col rules — the
+           previous :nth-last-child(-n+3):nth-child(odd) re-add was
+           contradictory and left the MIN FEE RATE / STATUS column
+           without a visible separator (user-reported). Reset to
+           every tile having both borders, then strip the right
+           border on the right column and the bottom border on
+           the last row. */
         .hxm-topbar { grid-template-columns: repeat(2, 1fr); }
-        .hxm-stat:nth-child(3n) { border-right: 1px solid var(--hxm-line); }
+        .hxm-stat {
+          border-right: 1px solid var(--hxm-line);
+          border-bottom: 1px solid var(--hxm-line);
+        }
         .hxm-stat:nth-child(2n) { border-right: none; }
         .hxm-stat:nth-last-child(-n+2) { border-bottom: none; }
-        .hxm-stat:nth-last-child(-n+3):nth-child(odd) { border-bottom: 1px solid var(--hxm-line); }
 
         .btx-modal-card { padding: 18px 14px !important; }
 
@@ -7973,6 +7993,13 @@ function CasinoCss() {
           padding: 16px 12px !important;
           min-height: auto !important;
         }
+
+        /* Footer simplified — only X icon + SOUND toggle survive
+           (same as portrait mobile). Version row + network badge
+           hidden. */
+        .hxm-footer-meta { display: none !important; }
+        .hxm-footer-network { display: none !important; }
+        .hxm-footer { justify-content: flex-end; padding: 6px 10px; }
       }
     `), null)}</>
   );
@@ -9540,7 +9567,7 @@ function FooterBar({ state, settle, settling, reset }) {
  // the rooms call into for dice/roulette/cards/lever sound.
   void state; void settle; void settling; void reset;
   return (
-    <footer style={{
+    <footer className="hxm-footer" style={{
       position: "relative", zIndex: 4,
       borderTop: "1px solid var(--hxm-line)",
       background: "linear-gradient(180deg, #0e0405, #050202)",
@@ -9548,18 +9575,28 @@ function FooterBar({ state, settle, settling, reset }) {
       display: "flex", alignItems: "center", gap: 16,
       fontSize: 11, color: "var(--hxm-text-dim)",
     }}>
-      <span className="hxm-mono" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <Shield size={12} color="var(--hxm-gold)" /> LUCKYPROTOCOL v0.1.0
-      </span>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--hxm-green)" }}>
-        <Lock size={11} /> Secure
-      </span>
-      <span>·</span>
-      <span>Provably Fair</span>
-      <span>·</span>
-      <span>On-Chain</span>
+      {/* Left-side metadata: version + trust badges. Wrapped in
+          .hxm-footer-meta so the mobile media query can hide the
+          whole group with one rule — these labels don't earn their
+          horizontal space on a narrow viewport, where the footer
+          was being clipped past "On-Chain" and the user couldn't
+          even see the X / SOUND buttons on the right. */}
+      <div className="hxm-footer-meta" style={{
+        display: "inline-flex", alignItems: "center", gap: 16,
+      }}>
+        <span className="hxm-mono" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Shield size={12} color="var(--hxm-gold)" /> LUCKYPROTOCOL v0.1.0
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--hxm-green)" }}>
+          <Lock size={11} /> Secure
+        </span>
+        <span>·</span>
+        <span>Provably Fair</span>
+        <span>·</span>
+        <span>On-Chain</span>
+      </div>
 
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+      <div className="hxm-footer-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
         {/* Social link — X for release announcements. GitHub icon was
             removed per user request. rel="noopener noreferrer"
             prevents window.opener leakage and tab-napping from the
@@ -9578,7 +9615,10 @@ function FooterBar({ state, settle, settling, reset }) {
           </svg>
         </a>
         <SoundToggle />
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+        {/* Network indicator wrapped in .hxm-footer-network so the
+            mobile CSS can hide it — on a narrow viewport the user
+            asked to keep only the X icon + SOUND toggle. */}
+        <span className="hxm-footer-network" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--hxm-green)", boxShadow: "0 0 6px var(--hxm-green)" }} />
           Network: <span style={{ color: "var(--hxm-text)" }}>Mainnet</span>
         </span>
