@@ -28,7 +28,7 @@ import {
   Volume2, VolumeX, Database, Search, Users, Check,
   Send, Plus, Trash2, Copy, EyeOff, KeyRound, ExternalLink, ArrowLeft,
   QrCode, Sliders, Hammer, ScanSearch, Boxes, Scissors, Heart, Cable,
-  Save,
+  Save, Menu,
 } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, YAxis, XAxis, Tooltip } from "recharts";
 import QRCode from "qrcode";
@@ -2289,6 +2289,32 @@ export default function LuckyProtocolApp() {
  // pitch. State lives at App level so any screen can keep it open
  // without re-mounting on screen switch.
   const [showDonate, setShowDonate] = useState(false);
+ // Mobile hamburger drawer — controls whether the left nav slides in
+ // as a fixed overlay on viewports <= 900px. Default false: drawer
+ // is closed, only the hamburger button is visible. On desktop this
+ // flag has zero effect (the drawer CSS lives entirely inside the
+ // mobile media query, so the sidebar renders in its normal in-flow
+ // position regardless). Auto-closes when a nav item is clicked so
+ // the user is taken straight to the chosen screen without an extra
+ // tap to dismiss.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+ // ESC closes the drawer (keyboard escape hatch matches what
+ // every modal in the app already does). Also auto-closes if the
+ // user resizes from a mobile width up into the desktop break-
+ // point — at that point the drawer CSS no longer applies anyway,
+ // but flipping the React flag false here keeps the backdrop
+ // overlay from briefly flashing on the desktop layout.
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setMobileNavOpen(false); };
+    const onResize = () => { if (window.innerWidth > 900) setMobileNavOpen(false); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [mobileNavOpen]);
  // Manual-refresh nonce for the global-indexer /tokens fetch. The
  // background effect re-runs every 60s on its own; this nonce gives
  // INDEX's SCAN button a way to force the next fetch to fire
@@ -4589,18 +4615,56 @@ export default function LuckyProtocolApp() {
       <CasinoCss />
       <BtxSharedCss />
 
+      {/* ============ MOBILE HAMBURGER BUTTON ============ */}
+      {/* Fixed-position button in the top-left corner, visible ONLY
+          on viewports <= 900px via CSS media query
+          (.hxm-mobile-nav-toggle defaults to display:none). Clicking
+          it toggles the drawer state which slides .hxm-sidebar-left
+          in from the left. On desktop this button renders but is
+          invisible; it doesn't affect layout because it's
+          position:fixed. */}
+      <button
+        type="button"
+        className="hxm-mobile-nav-toggle"
+        aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={mobileNavOpen}
+        onClick={() => setMobileNavOpen((v) => !v)}
+      >
+        {mobileNavOpen ? <X size={18} /> : <Menu size={18} />}
+      </button>
+
+      {/* ============ MOBILE NAV BACKDROP ============ */}
+      {/* Click-anywhere-outside-the-drawer-to-close affordance, plus
+          a dim overlay so the drawer reads as modal. Only rendered
+          when the drawer is open. On desktop the CSS media query
+          hides the toggle so this never runs (mobileNavOpen stays
+          false). */}
+      {mobileNavOpen && (
+        <div
+          className="hxm-mobile-nav-backdrop"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ============ LEFT SIDEBAR ============ */}
       {/* `locked` gates the wallet-requiring NAV items behind the
           "Generate wallet + Alchemy" onboarding. We test the same two
           conditions the rest of the app uses to decide whether signing
           + indexer reads are viable: wallet exists (walletMeta) AND an
-          Alchemy endpoint is configured. */}
+          Alchemy endpoint is configured.
+          `mobileNavOpen` + `onMobileNavClose` drive the mobile
+          drawer behavior: SidebarLeft toggles a CSS class that
+          slides it in/out, and closes the drawer automatically
+          whenever a nav item is tapped. */}
       <SidebarLeft
         activeNav={activeNav}
         setActiveNav={setActiveNav}
         setScreen={setScreen}
         onOpenDonate={() => setShowDonate(true)}
         locked={!walletMeta?.address || !hasAlchemyKey()}
+        mobileNavOpen={mobileNavOpen}
+        onMobileNavClose={() => setMobileNavOpen(false)}
       />
       {showDonate && (
         <DonateModal onClose={() => setShowDonate(false)} setToast={setToast} />
@@ -7485,6 +7549,15 @@ function CasinoCss() {
         cursor: pointer; border: 1px solid #5a4408;
       }
 
+      /* Hamburger toggle + backdrop default to display:none on
+         desktop. They're ALWAYS in the DOM (unconditional render in
+         App) so we need an explicit hide here — the media query
+         below flips them on at <= 900px. Without this default, the
+         hamburger would render as a default-styled button at the
+         top of the desktop UI. */
+      .hxm-mobile-nav-toggle { display: none; }
+      .hxm-mobile-nav-backdrop { display: none; }
+
       /* ==========================================================
        * MOBILE ADAPTATION — PHASE 1 (CSS-only, zero JSX changes)
        *
@@ -7536,39 +7609,81 @@ function CasinoCss() {
           min-height: 100dvh; /* iOS Safari: viewport without URL bar */
         }
 
-        /* Left nav becomes a horizontal icon strip at the top.
-           Logo / vegas stamp / donate / clock hide — they're
-           secondary, the user can still reach DONATE from inside
-           settings, and the clock is non-essential on mobile. */
+        /* Left nav becomes a SLIDE-IN DRAWER on mobile. Default
+           state: translated off-screen left, hidden. When the
+           hamburger toggles the mobile-open modifier class, the
+           drawer slides in from the left edge with a 220ms ease.
+           Layout inside the drawer keeps the SAME vertical
+           orientation as desktop (logo on top, nav buttons, VEGAS
+           stamp + DONATE at the bottom) — the user gets a familiar
+           menu, just one that overlays the main content instead of
+           sitting beside it. */
         .hxm-sidebar-left {
-          width: 100%;
-          height: auto;
-          flex-direction: row;
-          overflow-x: auto;
-          overflow-y: hidden;
-          padding: 6px 8px;
-          gap: 4px;
-          border-right: none;
-          border-bottom: 1px solid var(--hxm-line);
+          position: fixed;
+          top: 0;
+          left: 0;
+          z-index: 99;
+          width: min(260px, 78vw);
+          height: 100vh;
+          height: 100dvh;
+          flex-direction: column;
+          overflow-y: auto;
+          overflow-x: hidden;
+          padding: 14px 12px;
+          gap: 8px;
+          border-right: 1px solid var(--hxm-line);
+          border-bottom: none;
+          transform: translateX(-100%);
+          transition: transform 220ms cubic-bezier(.16,.84,.36,1);
+          box-shadow: 6px 0 24px rgba(0,0,0,0.55);
           -webkit-overflow-scrolling: touch;
         }
-        .hxm-sidebar-left .hxm-logo,
-        .hxm-sidebar-left .hxm-vegas,
-        .hxm-sidebar-left .hxm-vegas-stamp,
-        .hxm-sidebar-left .hxm-clock,
-        .hxm-sidebar-left .hxm-donate { display: none; }
-
-        /* Nav buttons: keep icon+label visible but compact. The
-           icon-only collapse is a Phase-2 polish (needs a JSX wrapper
-           on the label text to target it cleanly). For now we let
-           them flex naturally and rely on horizontal scroll if the
-           full set doesn't fit. */
-        .hxm-nav-btn {
-          flex: 0 0 auto;
-          padding: 8px 10px;
-          font-size: 11px;
-          white-space: nowrap;
+        .hxm-sidebar-left.hxm-sidebar-left--mobile-open {
+          transform: translateX(0);
         }
+
+        /* Hamburger toggle — fixed top-left, always visible on
+           mobile. Sits above the topbar (z 100 > backdrop 98 >
+           drawer 99 — drawer wins over backdrop, toggle wins over
+           drawer so it stays tappable when open). */
+        .hxm-mobile-nav-toggle {
+          display: inline-flex;
+          position: fixed;
+          top: 8px;
+          left: 8px;
+          z-index: 100;
+          width: 38px;
+          height: 38px;
+          align-items: center;
+          justify-content: center;
+          background: rgba(28, 12, 12, 0.92);
+          border: 1px solid var(--hxm-line-2);
+          border-radius: 7px;
+          color: var(--hxm-gold-bright);
+          cursor: pointer;
+          padding: 0;
+          box-shadow: 0 4px 14px rgba(0,0,0,0.55);
+        }
+        .hxm-mobile-nav-toggle:active { transform: scale(0.96); }
+
+        /* Backdrop behind the drawer — dim + tappable to dismiss. */
+        .hxm-mobile-nav-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 98;
+          background: rgba(0, 0, 0, 0.55);
+          backdrop-filter: blur(2px);
+          animation: hxm-fade-in 200ms ease-out;
+        }
+        @keyframes hxm-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+
+        /* Push the topbar's leftmost content right so the hamburger
+           doesn't sit on top of the first stat tile. 38px button
+           + 8px left offset + 8px gap = 54px clearance. */
+        .hxm-topbar { padding-left: 54px; }
 
         /* Body becomes column too — center on top, right sidebar
            below as a stacked section. Both grow naturally with
@@ -7707,7 +7822,7 @@ function LocalTimeClock() {
   );
 }
 
-function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked }) {
+function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked, mobileNavOpen, onMobileNavClose }) {
   const click = (item) => {
     // Locked items short-circuit silently. The hover-bubble tooltip
     // already surfaces LOCKED_HINT to the user, so we don't ALSO pop
@@ -7718,9 +7833,13 @@ function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked 
     if (locked && item.requiresUnlock) return;
     setActiveNav(item.key);
     if (item.screen) setScreen(item.screen);
+    // Auto-close the mobile drawer when the user picks a screen.
+    // No-op on desktop (mobileNavOpen is never true there because
+    // the hamburger that flips it is display:none).
+    onMobileNavClose?.();
   };
   return (
-    <aside className="hxm-sidebar-left">
+    <aside className={`hxm-sidebar-left${mobileNavOpen ? " hxm-sidebar-left--mobile-open" : ""}`}>
       <div className="hxm-logo">
         <img
           src={BRAND_ICON_SRC}
@@ -7832,7 +7951,7 @@ function SidebarLeft({ activeNav, setActiveNav, setScreen, onOpenDonate, locked 
         <button
           type="button"
           className="hxm-donate-pill"
-          onClick={onOpenDonate}
+          onClick={() => { onMobileNavClose?.(); onOpenDonate(); }}
           title="Support LUCKYPROTOCOL protocol development"
         >
           <Heart size={11} />
