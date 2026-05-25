@@ -123,7 +123,10 @@ import {
 import { fetchIndexedTokenRegistry } from "./indexer-web/api.js";
 import {
   getGlobalIndexerUrl,
+  setGlobalIndexerUrl,
   isGlobalIndexerEnabled,
+  getIndexerMode,
+  setIndexerMode,
   pingGlobalIndexer,
   fetchGlobalBalances,
   fetchGlobalUtxoBalances,
@@ -133,6 +136,7 @@ import {
   getSidecarStatus,
   wipeAndRescanIndexer,
   nudgeIndexerPoll,
+  DEFAULT_GLOBAL_INDEXER_URL,
 } from "./protocol/global_indexer.js";
 // Auto-updater scaffolded in src/protocol/updater.js — NOT imported here
 // in v0.1. The boot probe is wired up to call into a Tauri plugin we
@@ -2561,18 +2565,18 @@ export default function LuckyProtocolApp() {
  // a closed tab during onboarding)
  // Existing users who already have a key never see this modal — they
  // can rotate it from SETTINGS → ALCHEMY API KEY.
-  // Alchemy is REQUIRED — every user must register their OWN free
-  // Alchemy account and paste their personal HTTPS URL. We deliberately
-  // do NOT share a project-wide key (would be exposed in frontend JS
-  // for anyone to scrape, and one user's burst could exhaust the whole
-  // quota). Public mempool.space + blockstream.info exist as fallbacks
-  // only for transient Alchemy outages — not as a primary path.
-  //
-  // New users get blocked behind AlchemySetupModal until they paste a
-  // valid URL. Existing users with a saved key (hasAlchemyKey() = true)
-  // never see the modal. They can rotate / clear the key later from
-  // SETTINGS → ALCHEMY API KEY.
-  const [needAlchemy, setNeedAlchemy] = useState(() => !hasAlchemyKey());
+  // Alchemy is OPTIONAL — the default chain path is the official
+  // LUCKYPROTOCOL indexer at https://luckyprotocolai.com (token state)
+  // + mempool.space (BTC UTXOs / fees / broadcast). Users who want
+  // faster BTC chain queries on heavy use can paste an Alchemy URL in
+  // SETTINGS → ALCHEMY API KEY (still uses chain-web/esplora.js's
+  // alchemy-first fallback when configured). New users no longer get
+  // blocked behind AlchemySetupModal during onboarding — the modal
+  // only renders when `needAlchemy` is manually flipped to true (e.g.
+  // a future SETTINGS "Set up Alchemy" button), which we do not do
+  // automatically. Kept as state (rather than removed) so SETTINGS-
+  // driven re-prompt remains a one-liner if we ever bring it back.
+  const [needAlchemy, setNeedAlchemy] = useState(false);
  // Mandatory risk acknowledgment — every wallet must have ack'd at
  // least once before unlocking any signing flow. Stored timestamp at
  // `luckyprotocol.risk_ack.v1`; if absent (new install / wiped / never
@@ -2639,11 +2643,10 @@ export default function LuckyProtocolApp() {
       if (cache) {
         setWalletMeta(cache);
         setFirstRun(false);
- // Re-evaluate needAlchemy now that the cache is live (the
- // useState initial value ran before the async migration). If
- // the LS-stored Alchemy key got migrated in just now,
- // hasAlchemyKey() is now true and we hide the modal.
-        setNeedAlchemy(!hasAlchemyKey());
+ // Alchemy is optional now — never auto-trigger the modal even
+ // if no key is configured. SETTINGS surfaces the input field
+ // for users who explicitly want to set it.
+        setNeedAlchemy(false);
       } else {
         setWalletMeta(null);
         setFirstRun(true);
@@ -2653,22 +2656,23 @@ export default function LuckyProtocolApp() {
   }, []);
 
   // Chain-poll gate. We start the module-level _startSyncPoller ONLY
-  // when both a wallet AND an Alchemy endpoint exist. Before that:
+  // when a wallet exists. Before that:
   //   - the lobby is browseable (sidebar+dashboard render with
   //     placeholder "—" tiles)
-  //   - zero chain RPC fires (no mempool.space / blockstream.info /
-  //     Alchemy hits at all)
-  //   - the in-browser indexer never boots (its lazy boot is triggered
-  //     from pingGlobalIndexer, which lives inside _pollSyncOnce)
-  // Once the user finishes onboarding both halves, this useEffect re-
-  // fires, flips _syncEnabled=true, and the cold scan begins from
-  // activation height. Stops cleanly if the user later wipes the
-  // wallet or clears the Alchemy key from SETTINGS.
-  const alchemyReadyForGate = needAlchemy === false;
+  //   - zero chain RPC fires (no mempool.space / luckyprotocolai.com
+  //     hits at all)
+  //   - the in-browser indexer never boots (its lazy boot only fires
+  //     from inside pingGlobalIndexer, which lives in _pollSyncOnce
+  //     under this gate)
+  // Once the user finishes wallet onboarding, this useEffect re-fires,
+  // flips _syncEnabled=true, and the indexer poll begins. Stops cleanly
+  // if the user later wipes the wallet.
+  //
+  // Alchemy is no longer part of this gate — it's optional and only
+  // affects the chain-web Esplora fallback ordering when configured.
   useEffect(() => {
-    const ready = !!walletMeta?.address && alchemyReadyForGate;
-    _setSyncEnabled(ready);
-  }, [walletMeta?.address, alchemyReadyForGate]);
+    _setSyncEnabled(!!walletMeta?.address);
+  }, [walletMeta?.address]);
 
  // Boot-time auto-update probe — disabled in v0.1. See the import
  // comment above for re-enable steps.
@@ -2700,13 +2704,13 @@ export default function LuckyProtocolApp() {
  // accuracy doesn't need sub-minute resolution.
   const [addressTxs, setAddressTxs] = useState([]);
   useEffect(() => {
-    // Two-condition gate. Without BOTH we don't issue any address-tx
-    // fetch — the public Esplora mirrors (mempool.space / blockstream.info)
-    // would 429 within a few hundred hits if every casual visitor's
-    // browser polled them at 30s cadence, and the user already saw a
-    // "tx history fetch failed: all Esplora hosts unavailable" toast
-    // in production from exactly that scenario.
-    if (!walletMeta?.address || !hasAlchemyKey()) return undefined;
+    // Wallet-presence gate. Pre-wallet visitors fire zero chain
+    // traffic. Alchemy is no longer required — users without an
+    // Alchemy key fall through to mempool.space's free public
+    // Esplora, which is rate-limited per IP but fine for a single
+    // user's 30s-cadence tx-history poll. Heavy users can plug in
+    // an Alchemy key via SETTINGS.
+    if (!walletMeta?.address) return undefined;
     let cancelled = false;
     const fetchTxs = async () => {
       if (cancelled) return;
@@ -4752,7 +4756,7 @@ export default function LuckyProtocolApp() {
         setActiveNav={setActiveNav}
         setScreen={setScreen}
         onOpenDonate={() => setShowDonate(true)}
-        locked={!walletMeta?.address || !hasAlchemyKey()}
+        locked={!walletMeta?.address}
         mobileNavOpen={mobileNavOpen}
         onMobileNavClose={() => setMobileNavOpen(false)}
       />
@@ -4784,7 +4788,7 @@ export default function LuckyProtocolApp() {
           // indexer isn't booted, the fee feed is dark. Showing stale
           // zeroes would be misleading; showing the previous user's
           // numbers would be a privacy leak across browser profiles.
-          scanReady={!!walletMeta?.address && !needAlchemy}
+          scanReady={!!walletMeta?.address}
         />
 
         {/* Banner removed — replaced by the full-screen UnlockModal
@@ -4804,7 +4808,7 @@ export default function LuckyProtocolApp() {
                 goRoom={goRoom}
                 settle={settle}
                 settling={settling}
-                locked={!walletMeta?.address || !hasAlchemyKey()}
+                locked={!walletMeta?.address}
                 onLockedClick={() => setToast({ kind: "warn", msg: LOCKED_HINT })}
               />
             )}
@@ -4925,7 +4929,8 @@ export default function LuckyProtocolApp() {
                     if (cache) setWalletMeta(cache);
                   });
                   if (pw) setSessionPassword(pw);
-                  setNeedAlchemy(!hasAlchemyKey());
+                  // Alchemy optional — never auto-trigger post-onboarding.
+                  setNeedAlchemy(false);
                   setNeedRiskAck(!lsGetJSON(LS_KEYS.riskAck));
                 }}
               />
@@ -5013,7 +5018,7 @@ export default function LuckyProtocolApp() {
             goWallet={() => { setScreen("wallet"); setActiveNav("wallet"); }}
             aiMode={aiMode} setAiMode={setAiMode}
             onChainBets={onChainBets}
-            locked={!walletMeta?.address || !hasAlchemyKey()}
+            locked={!walletMeta?.address}
             onLockedClick={() => setToast({ kind: "warn", msg: LOCKED_HINT })}
           />
 
@@ -18237,14 +18242,12 @@ function SettingsScreen({
     if (setNeedRiskAck) setNeedRiskAck(true);
  // Symmetric re-arm for the Alchemy gate. `needAlchemy` is also a
  // `useState(initial)` that only reads `hasAlchemyKey()` at App
- // mount — even after this handler cleared the LS key AND wiped
- // the in-memory cache via settingsSetAlchemyKeyMock(null), the
- // React state stays at whatever it was at mount time (false, if
- // the user had a key before wipe). Without this setter, the
- // re-onboarded wallet skips AlchemySetupModal and goes straight
- // to RiskAck → WalletScreen, leaving the user with no Alchemy
- // URL bound to the new identity.
-    if (setNeedAlchemy) setNeedAlchemy(true);
+ // Alchemy is now optional — even after wipe we don't re-arm
+ // the modal. Users without an Alchemy key fall through to
+ // mempool.space (BTC ops) + https://luckyprotocolai.com
+ // (LUCKYPROTOCOL state), which works fine. SETTINGS surfaces
+ // the Alchemy input field for users who want to re-bind a key.
+    if (setNeedAlchemy) setNeedAlchemy(false);
     setToast({ kind: "warn", msg: "Wallet wiped — local state cleared" });
   };
 
@@ -18788,6 +18791,16 @@ function SettingsScreen({
         </button>
       </div>
 
+      {/* INDEXER SOURCE — pick where chain-derived state comes from.
+          Default ("HTTP mode") hits the official server at
+          DEFAULT_GLOBAL_INDEXER_URL. Browser mode runs a full LUCKYPROTOCOL
+          indexer inside this tab via IndexedDB — zero-trust at the cost
+          of a long cold scan on first run. Mode change requires reload
+          to drop in-flight HTTP fetches / boot the browser indexer
+          cleanly; we show a "Reload now" button instead of silently
+          swapping mid-session. */}
+      <IndexerSourcePanel setToast={setToast} />
+
       {/* WIPE WALLET — dev escape hatch to re-trigger onboarding. */}
       <div className="btx-panel" style={{ marginTop: 14, borderColor: "var(--hxm-red-dim)" }}>
         <div className="btx-section-head" style={{ color: "var(--hxm-red)" }}>// DANGER ZONE</div>
@@ -18818,6 +18831,162 @@ function SettingsScreen({
           border-bottom: 1px solid var(--hxm-line);
         }
       `), null)}</>
+    </div>
+  );
+}
+
+// =============================================================================
+// INDEXER SOURCE PANEL — switch between official HTTP indexer (default)
+//                        and the in-browser zero-trust indexer (advanced).
+// =============================================================================
+// Two backends share the same call surface (see protocol/global_indexer.js):
+//   * HTTP mode (default): hits DEFAULT_GLOBAL_INDEXER_URL, fast, free.
+//     Trade-off: you trust the team's server to compute state honestly.
+//   * Browser mode: scans every block locally via Esplora + IndexedDB.
+//     Trade-off: ~80 KB extra JS + a multi-minute cold scan on first
+//     enable, but you verify state with your own eyes — no operator
+//     can lie to you.
+//
+// Switching modes requires reload — we keep an in-flight HTTP poller,
+// an in-flight browser-indexer scan, and shared latched UI state (e.g.
+// initialSyncComplete) that would all need careful tear-down to swap
+// mid-session. Easier and safer to just refresh.
+function IndexerSourcePanel({ setToast }) {
+  const [mode, setMode]   = useState(() => getIndexerMode());
+  const [url,  setUrl]    = useState(() => getGlobalIndexerUrl());
+  const [draftUrl, setDraftUrl] = useState(url);
+  const [reloadHint, setReloadHint] = useState(false);
+
+  const isHttp    = mode === "http";
+  const isDefault = url === DEFAULT_GLOBAL_INDEXER_URL;
+
+  const flipMode = (next) => {
+    if (next === mode) return;
+    setIndexerMode(next);
+    setMode(next);
+    setReloadHint(true);
+    setToast({
+      kind: "ok",
+      msg: next === "browser"
+        ? "Switched to browser indexer — reload to start cold scan"
+        : "Switched to HTTP indexer — reload to drop in-flight scan",
+    });
+  };
+
+  const saveUrl = () => {
+    const trimmed = (draftUrl || "").trim();
+    if (!trimmed) {
+      setGlobalIndexerUrl(DEFAULT_GLOBAL_INDEXER_URL);
+      setUrl(DEFAULT_GLOBAL_INDEXER_URL);
+      setDraftUrl(DEFAULT_GLOBAL_INDEXER_URL);
+    } else {
+      // Bare validation — must look like a URL. Server-side trust
+      // is the user's call (advanced operators running a mirror).
+      let parsed;
+      try { parsed = new URL(trimmed); } catch {
+        setToast({ kind: "err", msg: "Indexer URL must be a valid http(s) URL" });
+        return;
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        setToast({ kind: "err", msg: "Indexer URL must use http:// or https://" });
+        return;
+      }
+      // Strip trailing slash for storage hygiene.
+      const clean = trimmed.replace(/\/+$/, "");
+      setGlobalIndexerUrl(clean);
+      setUrl(clean);
+      setDraftUrl(clean);
+    }
+    setReloadHint(true);
+    setToast({ kind: "ok", msg: "Indexer URL saved — reload to switch" });
+  };
+
+  return (
+    <div className="btx-panel" style={{ marginTop: 14 }}>
+      <div className="btx-section-head">// INDEXER SOURCE</div>
+      <p style={{ fontSize: 11, color: "var(--hxm-text-dim)", lineHeight: 1.7, marginTop: 6, marginBottom: 12 }}>
+        Where balance / UTXO / token / bet data comes from. Default is
+        the official LUCKYPROTOCOL indexer over HTTPS. Switch to
+        in-browser mode to verify state yourself from raw blocks (slow
+        first scan, zero-trust thereafter).
+      </p>
+
+      {/* Current mode badge + toggle */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <button
+          className={isHttp ? "btx-btn-gold" : "btx-btn-ghost"}
+          onClick={() => flipMode("http")}
+          style={{ flex: 1 }}
+        >
+          HTTP (official)
+        </button>
+        <button
+          className={!isHttp ? "btx-btn-gold" : "btx-btn-ghost"}
+          onClick={() => flipMode("browser")}
+          style={{ flex: 1 }}
+        >
+          Self-verify (advanced)
+        </button>
+      </div>
+
+      {/* URL field — only meaningful in HTTP mode but always shown so
+          advanced users can pre-configure before flipping. */}
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ fontSize: 11, color: "var(--hxm-text-dim)", display: "block", marginBottom: 4 }}>
+          Indexer URL {isDefault && <span style={{ color: "var(--hxm-gold-dim)" }}>(default)</span>}
+        </label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="text"
+            value={draftUrl}
+            onChange={(e) => setDraftUrl(e.target.value)}
+            placeholder={DEFAULT_GLOBAL_INDEXER_URL}
+            style={{
+              flex: 1,
+              padding: "8px 10px",
+              background: "var(--hxm-bg-input)",
+              color: "var(--hxm-text)",
+              border: "1px solid var(--hxm-line)",
+              borderRadius: 3,
+              fontSize: 12,
+              fontFamily: "monospace",
+            }}
+          />
+          <button className="btx-btn-ghost" onClick={saveUrl} disabled={draftUrl === url}>
+            SAVE
+          </button>
+        </div>
+        <p style={{ fontSize: 10, color: "var(--hxm-text-dim)", lineHeight: 1.6, marginTop: 6 }}>
+          Leave blank to restore default. Only HTTP mode uses this URL — browser mode
+          scans blocks directly from Esplora.
+        </p>
+      </div>
+
+      {/* Reload nudge — visible after any mode/URL change. */}
+      {reloadHint && (
+        <div style={{
+          marginTop: 12,
+          padding: "10px 12px",
+          background: "rgba(255, 200, 0, 0.08)",
+          border: "1px solid var(--hxm-gold-dim)",
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          fontSize: 11,
+          color: "var(--hxm-text)",
+        }}>
+          <span style={{ flex: 1 }}>
+            Reload the page so the change takes effect cleanly.
+          </span>
+          <button
+            className="btx-btn-gold"
+            onClick={() => { try { window.location.reload(); } catch { /* ignore */ } }}
+          >
+            RELOAD NOW
+          </button>
+        </div>
+      )}
     </div>
   );
 }
