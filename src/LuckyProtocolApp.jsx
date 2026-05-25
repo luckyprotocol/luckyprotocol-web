@@ -18356,75 +18356,27 @@ function SettingsScreen({
 
       <IndexerDiagnosticsPanel sync={sync} chainState={chainState} />
 
-      {/* ALCHEMY API KEY — web build's PRIMARY indexer accelerator.
-          Without a key the indexer goes through public mempool.space +
-          blockstream.info, which 429 us almost immediately during cold
-          scan. With a key (free tier is plenty), every HTTP request
-          gets prepended-tried at https://bitcoin-mainnet.g.alchemy.com
-          before falling back to public endpoints. chain-web/esplora.js
-          calls _alchemyBase() per-request and prepends to the failover
-          chain.
+      {/* ALCHEMY API KEY panel removed.
+          The Alchemy multi-source pipeline depended on chain-web/, which
+          was deleted when chain queries unified onto the official
+          LUCKYPROTOCOL indexer. Heavy users who want faster broadcast/fee
+          throughput can run their own mempool.space mirror; everyone else
+          just uses mempool.space's free public endpoint.
+          State + handlers (`alchemyKeyInput`, `saveAlchemyKey`, etc.) are
+          still declared above for now — they no-op via the shimmed
+          chainSetAlchemyKey at the top of this file. They'll be pruned
+          when this component gets a real refactor pass. */}
 
-          Key is persisted in localStorage (`luckyprotocol.alchemy_key.v2`).
-          chain-web's request pipeline is updated synchronously via
-          setEsploraAlchemyKey on every save, so no app restart is
-          needed. */}
-      <div className="btx-panel" style={{ marginTop: 8 }}>
-        <div className="btx-section-head">// ALCHEMY API KEY</div>
-        <p style={{ fontSize: 11, color: "var(--hxm-text-dim)", lineHeight: 1.7, marginTop: 6, marginBottom: 10 }}>
-          An Alchemy mainnet API key makes chain sync <b>10–50× faster</b> vs.
-          the public endpoints (which 429 us during cold scan). The key is
-          saved in this browser's local storage and is the PRIMARY endpoint
-          used by the in-browser indexer — public mempool.space /
-          blockstream.info only run when Alchemy fails. Get a free key at{" "}
-          <b
-            onClick={() => openExternal("https://www.alchemy.com")}
-            style={{ color: "var(--hxm-gold-bright)", textDecoration: "underline", cursor: "pointer" }}
-            title="Open alchemy.com in a new tab"
-          >
-            alchemy.com
-          </b>
-          {" "}→ Create app → Chain: Bitcoin, Network: Mainnet → <b>Endpoints</b> tab →
-          copy the <b>HTTPS URL</b>.
-        </p>
-        <label className="hxm-bebas" style={{ fontSize: 10, color: "var(--hxm-text-mute)", letterSpacing: "0.22em" }}>
-          ALCHEMY HTTPS URL
-        </label>
-        <input
-          type="text"
-          value={alchemyKeyInput}
-          onChange={(e) => setAlchemyKeyInput(e.target.value)}
-          placeholder="https://bitcoin-mainnet.g.alchemy.com/v2/..."
-          autoComplete="off"
-          spellCheck={false}
-          className="btx-input"
-          style={{ marginTop: 4, marginBottom: 10 }}
-        />
-        <button className="btx-btn-primary" onClick={saveAlchemyKey} disabled={alchemyBusy}>
-          <KeyRound size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />
-          {alchemyBusy ? "SAVING..." : "SAVE ALCHEMY KEY"}
-        </button>
-        {alchemyMsg && (
-          <div className="hxm-mono" style={{
-            marginTop: 10, fontSize: 11, lineHeight: 1.5,
-            color: alchemyMsg.startsWith("key ") ? "var(--hxm-green)" : "var(--hxm-red)",
-          }}>
-            {alchemyMsg}
-          </div>
-        )}
-      </div>
-
-      {/* BTC ENDPOINTS — restored in web build. Priority order applied
-          by chain-web/esplora.js's _esploraBases():
-            1. Bitcoin Core JSON-RPC (if any [core] row is configured)
-                — most trustless, lowest latency on LAN
-            2. Alchemy (if key configured) — high rate limit
-            3. Saved Esplora rows (REST, in order)
-            4. Public mempool.space / blockstream.info — fallback
-          For Bitcoin Core to work from the browser, the node MUST be
-          exposed with CORS headers (e.g. via a reverse-proxy like nginx
-          or caddy). The browser can't bypass CORS the way the desktop
-          Rust backend could. */}
+      {/* BTC ENDPOINTS panel removed.
+          Chain endpoints used to be a configurable failover chain
+          (alchemy + mempool + blockstream + emzy + bitcoin-21 + a user-
+          provided Bitcoin Core). All collapsed when chain-web/ was
+          deleted; the only chain sources now are the hard-coded official
+          LUCKYPROTOCOL indexer (`getGlobalIndexerUrl()`) and mempool.space
+          for fee rates + broadcast. Both URLs are pinned in source, not
+          SETTINGS-tunable. State + add/remove/save handlers below stay
+          dormant so the build doesn't reshape; pruning is a follow-up. */}
+      {false && (
       <div className="btx-panel" style={{ marginTop: 8 }}>
         <div className="btx-section-head">// BTC ENDPOINTS</div>
         <p style={{ fontSize: 11, color: "var(--hxm-text-dim)", lineHeight: 1.7, marginTop: 6, marginBottom: 12 }}>
@@ -18575,6 +18527,7 @@ function SettingsScreen({
           }}>{epMsg}</div>
         )}
       </div>
+      )}
 
       {/* FEE RATE */}
       <div className="btx-panel" style={{ marginTop: 8 }}>
