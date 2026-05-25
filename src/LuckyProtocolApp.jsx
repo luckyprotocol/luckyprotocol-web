@@ -82,12 +82,22 @@ import {
   syncAddress as chainSyncAddress,
   fetchRecommendedFees as chainFetchFees,
   fetchNextBlockFee as chainFetchNextBlockFee,
-  listAddressTxs as chainListAddressTxs,
-  getAlchemyKey as chainGetAlchemyKey,
-  setAlchemyKey as chainSetAlchemyKey,
-  setAlchemyKeySync as chainSetAlchemyKeySync,
-  getAlchemyEsploraBase as chainGetAlchemyEsploraBase,
 } from "./protocol/chain.js";
+
+// ---------------------------------------------------------------------------
+// Alchemy + tx-history shims.
+// The Alchemy key flow and the generic BTC tx-history view were removed
+// when chain queries were unified onto the official LUCKYPROTOCOL indexer.
+// We keep no-op stand-ins for the names the file historically used so the
+// rest of the component tree compiles unchanged — every callsite that
+// touched these is now either dead code (vestigial alchemy state machinery)
+// or harmless (resolves to an empty tx list / null key).
+// ---------------------------------------------------------------------------
+const chainGetAlchemyKey       = async () => null;
+const chainSetAlchemyKey       = async (_k) => undefined;
+const chainSetAlchemyKeySync   = (_k) => undefined;
+const chainGetAlchemyEsploraBase = () => null;
+const chainListAddressTxs      = async (_addr, _net) => [];
 import { changePassword as protocolChangePassword } from "./protocol/protocol.js";
 import { sendToAddress as txSendToAddress, splitUtxo as txSplitUtxo } from "./protocol/tx.js";
 import {
@@ -120,13 +130,14 @@ import {
 //   - syntheticTx outcome loop's knownTickers
 // so a MINE for a chain-deployed ticker doesn't get marked INVALID
 // just because the local cache hasn't synced the DEPLOY's status.
-import { fetchIndexedTokenRegistry } from "./indexer-web/api.js";
+// indexer-web/ was deleted; provide an inline shim so existing callers
+// resolve to an empty registry (the global indexer's /tokens endpoint
+// is now the source of truth — fetchGlobalTokens covers it).
+const fetchIndexedTokenRegistry = () => [];
 import {
   getGlobalIndexerUrl,
   setGlobalIndexerUrl,
   isGlobalIndexerEnabled,
-  getIndexerMode,
-  setIndexerMode,
   pingGlobalIndexer,
   fetchGlobalBalances,
   fetchGlobalUtxoBalances,
@@ -1016,10 +1027,12 @@ const setEndpointsMock = async (eps) => {
   // any chain-web wrapper runs. Best-effort; chain-web's setter is
   // sync + non-throwing, but guard anyway so a misshapen `eps` can't
   // crash the React onClick handler.
-  try {
-    const { setEsploraCustomEndpoints } = await import("./chain-web/esplora.js");
-    setEsploraCustomEndpoints(stripped);
-  } catch (_e) { /* chain-web not ready / not in web build */ }
+  // chain-web was removed when chain queries unified onto the official
+  // LUCKYPROTOCOL indexer. Custom endpoint lists used to push into
+  // setEsploraCustomEndpoints; the indexer-only architecture has no
+  // endpoint-failover chain to update, so the LS write above is the
+  // only persistence left for this UI control (kept so user config
+  // doesn't vanish on read, though nothing currently consumes it).
 };
 
 const getFeeRateMock = () => lsGetJSON(LS_KEYS.feeRate) ?? "1";
@@ -1769,18 +1782,12 @@ try {
   }
 } catch { /* localStorage unavailable — skip migration */ }
 
-// Push the user's saved BTC ENDPOINTS into chain-web before anything
-// else fires an HTTP call. This makes Bitcoin Core RPC actually
-// priority #1 from the very first request (otherwise the first few
-// sync ticks would hit public Esplora before Settings re-saved).
-// Best-effort; failure just falls back to the default endpoint
-// pipeline.
-(async () => {
-  try {
-    const { setEsploraCustomEndpoints } = await import("./chain-web/esplora.js");
-    setEsploraCustomEndpoints(getEndpointsMock());
-  } catch (_e) { /* chain-web unavailable — non-fatal */ }
-})();
+// chain-web/ was removed when chain queries unified onto the official
+// LUCKYPROTOCOL indexer. The custom-endpoint list still gets written
+// to localStorage by SETTINGS for backwards-compat, but no longer
+// affects the request pipeline — the only chain source is now
+// `getGlobalIndexerUrl()` (the official indexer base) + mempool.space
+// for fee rates and tx broadcast.
 
 // NO module-load auto-start. The poller now starts only when React
 // flips _setSyncEnabled(true) from a useEffect that watches walletMeta
@@ -18512,24 +18519,22 @@ function SettingsScreen({
                       }}
                       disabled={ep._testing}
                       onClick={async () => {
-                        // First persist the row so chain-web sees the
-                        // latest credentials, then run the diagnostic.
+                        // The Core RPC TEST button used to ping a user's
+                        // private Bitcoin Core node directly via the
+                        // (now removed) chain-web/coreRpc helper. With
+                        // the indexer-only architecture the front-end
+                        // doesn't talk to anyone's Core RPC, so we just
+                        // persist the row and surface a synthetic result
+                        // explaining the change.
                         await setEndpointsMock(endpoints);
                         update(i, "_testing", true);
                         update(i, "_testResult", null);
-                        try {
-                          const { testCoreRpc } = await import("./chain-web/coreRpc.js");
-                          const result = await testCoreRpc({
-                            url: ep.url,
-                            user: ep.user,
-                            password: ep.password,
-                          });
-                          update(i, "_testResult", result);
-                        } catch (e) {
-                          update(i, "_testResult", { ok: false, kind: "unknown", detail: String(e?.message || e) });
-                        } finally {
-                          update(i, "_testing", false);
-                        }
+                        update(i, "_testResult", {
+                          ok: false,
+                          kind: "unsupported",
+                          detail: "Core RPC test removed — chain queries now go through the official LUCKYPROTOCOL indexer at " + DEFAULT_GLOBAL_INDEXER_URL,
+                        });
+                        update(i, "_testing", false);
                       }}
                     >
                       {ep._testing ? "TESTING…" : "TEST"}
@@ -18791,15 +18796,14 @@ function SettingsScreen({
         </button>
       </div>
 
-      {/* INDEXER SOURCE — pick where chain-derived state comes from.
-          Default ("HTTP mode") hits the official server at
-          DEFAULT_GLOBAL_INDEXER_URL. Browser mode runs a full LUCKYPROTOCOL
-          indexer inside this tab via IndexedDB — zero-trust at the cost
-          of a long cold scan on first run. Mode change requires reload
-          to drop in-flight HTTP fetches / boot the browser indexer
-          cleanly; we show a "Reload now" button instead of silently
-          swapping mid-session. */}
-      <IndexerSourcePanel setToast={setToast} />
+      {/* INDEXER SOURCE panel removed.
+          The browser-side indexer has been deleted; every chain
+          read now flows through the official LUCKYPROTOCOL indexer
+          at DEFAULT_GLOBAL_INDEXER_URL. Advanced operators running
+          their own mirror can still override the URL by writing
+          localStorage["luckyprotocol.global_indexer_url"] from
+          DevTools, but the SETTINGS toggle isn't needed for the
+          common path. */}
 
       {/* WIPE WALLET — dev escape hatch to re-trigger onboarding. */}
       <div className="btx-panel" style={{ marginTop: 14, borderColor: "var(--hxm-red-dim)" }}>
@@ -18831,162 +18835,6 @@ function SettingsScreen({
           border-bottom: 1px solid var(--hxm-line);
         }
       `), null)}</>
-    </div>
-  );
-}
-
-// =============================================================================
-// INDEXER SOURCE PANEL — switch between official HTTP indexer (default)
-//                        and the in-browser zero-trust indexer (advanced).
-// =============================================================================
-// Two backends share the same call surface (see protocol/global_indexer.js):
-//   * HTTP mode (default): hits DEFAULT_GLOBAL_INDEXER_URL, fast, free.
-//     Trade-off: you trust the team's server to compute state honestly.
-//   * Browser mode: scans every block locally via Esplora + IndexedDB.
-//     Trade-off: ~80 KB extra JS + a multi-minute cold scan on first
-//     enable, but you verify state with your own eyes — no operator
-//     can lie to you.
-//
-// Switching modes requires reload — we keep an in-flight HTTP poller,
-// an in-flight browser-indexer scan, and shared latched UI state (e.g.
-// initialSyncComplete) that would all need careful tear-down to swap
-// mid-session. Easier and safer to just refresh.
-function IndexerSourcePanel({ setToast }) {
-  const [mode, setMode]   = useState(() => getIndexerMode());
-  const [url,  setUrl]    = useState(() => getGlobalIndexerUrl());
-  const [draftUrl, setDraftUrl] = useState(url);
-  const [reloadHint, setReloadHint] = useState(false);
-
-  const isHttp    = mode === "http";
-  const isDefault = url === DEFAULT_GLOBAL_INDEXER_URL;
-
-  const flipMode = (next) => {
-    if (next === mode) return;
-    setIndexerMode(next);
-    setMode(next);
-    setReloadHint(true);
-    setToast({
-      kind: "ok",
-      msg: next === "browser"
-        ? "Switched to browser indexer — reload to start cold scan"
-        : "Switched to HTTP indexer — reload to drop in-flight scan",
-    });
-  };
-
-  const saveUrl = () => {
-    const trimmed = (draftUrl || "").trim();
-    if (!trimmed) {
-      setGlobalIndexerUrl(DEFAULT_GLOBAL_INDEXER_URL);
-      setUrl(DEFAULT_GLOBAL_INDEXER_URL);
-      setDraftUrl(DEFAULT_GLOBAL_INDEXER_URL);
-    } else {
-      // Bare validation — must look like a URL. Server-side trust
-      // is the user's call (advanced operators running a mirror).
-      let parsed;
-      try { parsed = new URL(trimmed); } catch {
-        setToast({ kind: "err", msg: "Indexer URL must be a valid http(s) URL" });
-        return;
-      }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        setToast({ kind: "err", msg: "Indexer URL must use http:// or https://" });
-        return;
-      }
-      // Strip trailing slash for storage hygiene.
-      const clean = trimmed.replace(/\/+$/, "");
-      setGlobalIndexerUrl(clean);
-      setUrl(clean);
-      setDraftUrl(clean);
-    }
-    setReloadHint(true);
-    setToast({ kind: "ok", msg: "Indexer URL saved — reload to switch" });
-  };
-
-  return (
-    <div className="btx-panel" style={{ marginTop: 14 }}>
-      <div className="btx-section-head">// INDEXER SOURCE</div>
-      <p style={{ fontSize: 11, color: "var(--hxm-text-dim)", lineHeight: 1.7, marginTop: 6, marginBottom: 12 }}>
-        Where balance / UTXO / token / bet data comes from. Default is
-        the official LUCKYPROTOCOL indexer over HTTPS. Switch to
-        in-browser mode to verify state yourself from raw blocks (slow
-        first scan, zero-trust thereafter).
-      </p>
-
-      {/* Current mode badge + toggle */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <button
-          className={isHttp ? "btx-btn-gold" : "btx-btn-ghost"}
-          onClick={() => flipMode("http")}
-          style={{ flex: 1 }}
-        >
-          HTTP (official)
-        </button>
-        <button
-          className={!isHttp ? "btx-btn-gold" : "btx-btn-ghost"}
-          onClick={() => flipMode("browser")}
-          style={{ flex: 1 }}
-        >
-          Self-verify (advanced)
-        </button>
-      </div>
-
-      {/* URL field — only meaningful in HTTP mode but always shown so
-          advanced users can pre-configure before flipping. */}
-      <div style={{ marginBottom: 8 }}>
-        <label style={{ fontSize: 11, color: "var(--hxm-text-dim)", display: "block", marginBottom: 4 }}>
-          Indexer URL {isDefault && <span style={{ color: "var(--hxm-gold-dim)" }}>(default)</span>}
-        </label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            type="text"
-            value={draftUrl}
-            onChange={(e) => setDraftUrl(e.target.value)}
-            placeholder={DEFAULT_GLOBAL_INDEXER_URL}
-            style={{
-              flex: 1,
-              padding: "8px 10px",
-              background: "var(--hxm-bg-input)",
-              color: "var(--hxm-text)",
-              border: "1px solid var(--hxm-line)",
-              borderRadius: 3,
-              fontSize: 12,
-              fontFamily: "monospace",
-            }}
-          />
-          <button className="btx-btn-ghost" onClick={saveUrl} disabled={draftUrl === url}>
-            SAVE
-          </button>
-        </div>
-        <p style={{ fontSize: 10, color: "var(--hxm-text-dim)", lineHeight: 1.6, marginTop: 6 }}>
-          Leave blank to restore default. Only HTTP mode uses this URL — browser mode
-          scans blocks directly from Esplora.
-        </p>
-      </div>
-
-      {/* Reload nudge — visible after any mode/URL change. */}
-      {reloadHint && (
-        <div style={{
-          marginTop: 12,
-          padding: "10px 12px",
-          background: "rgba(255, 200, 0, 0.08)",
-          border: "1px solid var(--hxm-gold-dim)",
-          borderRadius: 3,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          fontSize: 11,
-          color: "var(--hxm-text)",
-        }}>
-          <span style={{ flex: 1 }}>
-            Reload the page so the change takes effect cleanly.
-          </span>
-          <button
-            className="btx-btn-gold"
-            onClick={() => { try { window.location.reload(); } catch { /* ignore */ } }}
-          >
-            RELOAD NOW
-          </button>
-        </div>
-      )}
     </div>
   );
 }

@@ -19,7 +19,7 @@
 //     we get the same vout layout.
 
 import * as btc from "@scure/btc-signer";
-import { getAddressUtxos, broadcastTx, getRecommendedFeeRate } from "../chain-web/esplora.js";
+import { getAddressUtxos, broadcastTx, getRecommendedFeeRate } from "../protocol/chain.js";
 import { getSession } from "../wallet-web/session.js";
 import { DUST_SATS } from "./payloads.js";
 

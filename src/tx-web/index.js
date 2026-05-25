@@ -41,7 +41,7 @@ import {
   DUST_SATS,
 } from "./payloads.js";
 import { getSession } from "../wallet-web/session.js";
-import { fetchUtxoBalances } from "../indexer-web/api.js";
+import { fetchGlobalUtxoBalances } from "../protocol/global_indexer.js";
 
 /**
  * Auto-collected list of the wallet's currently-known token UTXOs.
@@ -50,17 +50,18 @@ import { fetchUtxoBalances } from "../indexer-web/api.js";
  * sweeps a token UTXO into its inputs — which would BURN the tokens
  * under the strict residual-routing rule (applyTx STEP 3).
  *
- * Reads from the in-memory browser indexer, NOT Esplora — this is
- * cheap (Map lookup), synchronous, and reflects every SEND/MINE
- * the indexer has already applied. Falls back to an empty array
- * if the indexer hasn't booted yet (cold start before fastBootstrap
- * completes); in that window the wallet hasn't had time to receive
- * any tokens anyway.
+ * Hits the official indexer's `/utxos/:addr` over HTTPS — same data
+ * the wallet already polls for the balance tile, just unwrapped to
+ * the `{ txid, vout }` shape the coin-selector cares about. Returns
+ * an empty array on any error (network fail, address not yet seen
+ * by the indexer) — safe default: the coin selector will then treat
+ * every UTXO as eligible for fee funding, which is the right thing
+ * for an unfunded / unseen address.
  */
-function _autoTokenUnspendables(address) {
+async function _autoTokenUnspendables(address) {
   try {
-    const { utxos } = fetchUtxoBalances(address);
-    return utxos.map((u) => ({ txid: u.txid, vout: u.vout }));
+    const utxos = await fetchGlobalUtxoBalances(address);
+    return (utxos || []).map((u) => ({ txid: u.txid, vout: u.vout }));
   } catch (_e) {
     return [];
   }
@@ -230,7 +231,7 @@ export async function sendToAddress({ toAddress, amountSats, feeRateSatVb, unspe
   // Auto-exclude every known token UTXO from coin selection. Without
   // this, a pure-BTC send can silently sweep a token UTXO into its
   // inputs and BURN the tokens (applyTx STEP 3 strict-burn rule).
-  const merged = _mergeUnspendables(unspendableOutpoints, _autoTokenUnspendables(address));
+  const merged = _mergeUnspendables(unspendableOutpoints, await _autoTokenUnspendables(address));
 
   const result = await buildAndBroadcast({
     outputs: [
@@ -278,7 +279,7 @@ export async function splitUtxo({ chipCount, chipSatsEach, feeRateSatVb, unspend
   // (which collide with token UTXOs in size), so a coin-selector that
   // grabs a token UTXO would mix it into the chip set and the user
   // loses tokens without any visible indicator.
-  const merged = _mergeUnspendables(unspendableOutpoints, _autoTokenUnspendables(address));
+  const merged = _mergeUnspendables(unspendableOutpoints, await _autoTokenUnspendables(address));
 
   const result = await buildAndBroadcast({
     outputs,

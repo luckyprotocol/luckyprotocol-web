@@ -23,7 +23,20 @@
 // function below is now a pure JS path.
 
 import * as txWeb from "../tx-web/index.js";
-import * as chainWeb from "../chain-web/esplora.js";
+// chainWeb is no longer a separate module — its surface lives in
+// chain.js + global_indexer.js. We import the three functions we
+// actually use (status / block-hash-by-height / block-info-by-height)
+// and synthesize the namespace-import shape for the call sites below.
+import {
+  getTxStatus as chainWebGetTxStatus,
+  getBlockHashAt as chainWebGetBlockHashAt,
+  getBlockInfoAt as chainWebGetBlockInfoAt,
+} from "./chain.js";
+const chainWeb = {
+  fetchTxStatus:    (txid)    => chainWebGetTxStatus(txid).then((r) => r),
+  fetchBlockHashAt: (height)  => chainWebGetBlockHashAt(height),
+  fetchBlockInfoAt: (height)  => chainWebGetBlockInfoAt(height),
+};
 import { changePassword as walletWebChangePassword } from "../wallet-web/index.js";
 
 /**

@@ -1,35 +1,39 @@
-// LUCKYPROTOCOL indexer adapter — dispatcher between two backends:
+// LUCKYPROTOCOL indexer adapter — HTTP only.
 //
-//   Default mode (`http`):  hit the official LUCKYPROTOCOL indexer over
-//   HTTPS — https://luckyprotocolai.com. Every read API is a direct
-//   fetch(). Failures are HARD ERRORS (no silent fallback) — the user
-//   either trusts the team's indexer or switches to browser mode.
+// Every chain-derived read in the web build goes through the official
+// LUCKYPROTOCOL indexer at https://luckyprotocolai.com (or whatever
+// `getGlobalIndexerUrl()` resolves to — advanced operators running
+// their own mirror can override it via SETTINGS, but the default
+// always points at the team-operated server).
 //
-//   Advanced mode (`browser`): the in-browser indexer at
-//   src/indexer-web/ scans blocks directly from a public Esplora and
-//   keeps derived state in IndexedDB. Zero-trust at the cost of
-//   ~80 KB extra JS + a long cold-scan on first run. Activated by
-//   flipping SETTINGS → "Self-verify in browser (advanced)" which
-//   writes `luckyprotocol.indexer_mode = "browser"`.
+// There is NO third-party fallback in this binary. If the indexer is
+// unreachable, every read throws — the React layer surfaces that as
+// the "Indexer down" state in the STATUS tile, but does NOT silently
+// route to mempool.space or anywhere else. Mempool.space stays as the
+// chain endpoint for exactly two things: pulling recommended fee
+// rates and broadcasting freshly-signed transactions. Both live in
+// `chain.js`, not here.
 //
-// The React layer (LuckyProtocolApp.jsx) imports the same set of
-// functions in either mode, so no caller needs an `if (mode === ...)`
-// branch.
+// Endpoints proxied here (one helper per indexer route):
 //
-// SETTINGS keys:
-//   localStorage["luckyprotocol.indexer_mode"]     — "http" | "browser"
+//   GET /                              -> pingGlobalIndexer
+//   GET /balances/:addr                -> fetchGlobalBalances
+//   GET /utxos/:addr                   -> fetchGlobalUtxoBalances    (token UTXOs)
+//   GET /btc-utxos/:addr               -> fetchGlobalBtcUtxos        (raw BTC UTXOs)
+//   GET /bets/:addr                    -> fetchGlobalBets
+//   GET /transfers/:addr               -> fetchGlobalTransfers
+//   GET /tokens?...                    -> fetchGlobalTokensPaged
+//   GET /tokens/:ticker/holders?...    -> fetchTokenHolders
+//   GET /tx-status/:txid               -> fetchGlobalTxStatus
+//   GET /block-height/:h               -> fetchGlobalBlockHash
+//   GET /block-info/:h                 -> fetchGlobalBlockInfo
+//   POST /poll-now                     -> nudgeIndexerPoll
+//
+// SETTINGS key (advanced):
 //   localStorage["luckyprotocol.global_indexer_url"] — override default
-//                                                     HTTP base (advanced
-//                                                     users running their
-//                                                     own mirror)
+//                                                     base URL.
 
-// ---- Setting plumbing ---------------------------------------------------
-
-const LS_URL_KEY  = "luckyprotocol.global_indexer_url";
-const LS_MODE_KEY = "luckyprotocol.indexer_mode";
-// Legacy key kept for backwards-compat read; new SETTINGS UI no longer
-// surfaces it (the toggle is on/off rather than a free-form URL).
-const LS_USE_KEY  = "luckyprotocol.use_global_indexer";
+const LS_URL_KEY = "luckyprotocol.global_indexer_url";
 
 /**
  * Default HTTP base for the public LUCKYPROTOCOL indexer. End users
@@ -55,32 +59,19 @@ export function setGlobalIndexerUrl(url) {
 }
 
 /**
- * Active dispatcher mode. Returns "http" (default — talks to
- * `getGlobalIndexerUrl()`) or "browser" (uses the in-browser
- * indexer in src/indexer-web/).
- */
-export function getIndexerMode() {
-  const v = lsGet(LS_MODE_KEY);
-  return v === "browser" ? "browser" : "http";
-}
-export function setIndexerMode(mode) {
-  lsSet(LS_MODE_KEY, mode === "browser" ? "browser" : "http");
-}
-
-/**
- * Backwards-compat — the React layer historically conditioned UI on
- * this flag. With the web build there's always an indexer available
- * (HTTP or browser), so we hard-return true.
+ * Always true in the web build — the wallet can't function without an
+ * indexer, and the indexer is always reachable in principle (just an
+ * HTTPS GET). Kept for backwards-compat with legacy call sites that
+ * branched on this.
  */
 export function isGlobalIndexerEnabled() {
   return true;
 }
 export function setGlobalIndexerEnabled(_on) {
-  // Persist the legacy key just in case some other code-path reads it.
-  lsSet(LS_USE_KEY, "1");
+  /* no-op — kept so legacy callsites don't crash */
 }
 
-// ---- HTTP transport (default mode) --------------------------------------
+// ---- HTTP transport -----------------------------------------------------
 
 const _httpGet = async (path, signal) => {
   const base = getGlobalIndexerUrl().replace(/\/+$/, "");
@@ -89,15 +80,15 @@ const _httpGet = async (path, signal) => {
   try {
     res = await fetch(url, { signal });
   } catch (e) {
-    // Network failure (DNS, CORS preflight rejection, TLS, offline) —
-    // wrap with a clearer error so the React error surface can show
-    // "indexer unreachable" rather than the generic TypeError.
+    // Network failure (DNS / offline / CORS preflight) — wrap with a
+    // clearer message so React's error surface can show "indexer
+    // unreachable" instead of the generic TypeError.
     throw new Error(`Indexer unreachable: ${url} — ${e.message || e}`);
   }
   if (!res.ok) {
     let body = "";
     try { body = (await res.text()).slice(0, 200); } catch { /* ignore */ }
-    throw new Error(`Indexer ${path} → HTTP ${res.status}${body ? `: ${body}` : ""}`);
+    throw new Error(`Indexer ${path} -> HTTP ${res.status}${body ? `: ${body}` : ""}`);
   }
   return await res.json();
 };
@@ -111,54 +102,18 @@ const _httpPost = async (path, body, signal) => {
     body: body == null ? "" : JSON.stringify(body),
     signal,
   });
-  if (!res.ok) {
-    throw new Error(`Indexer POST ${path} → HTTP ${res.status}`);
-  }
-  // The indexer's POST endpoints may legitimately return empty 204.
+  if (!res.ok) throw new Error(`Indexer POST ${path} -> HTTP ${res.status}`);
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
   return await res.json();
 };
 
-// ---- Browser indexer (lazy import) --------------------------------------
-//
-// The browser indexer (`src/indexer-web/`) is ~80 KB of JS plus all its
-// chain-fetch helpers. We `await import()` it ONLY when the user has
-// flipped SETTINGS into browser mode — default users on HTTP mode
-// never pay that bundle cost.
-
-let _browserMod = null;
-let _browserBootKicked = false;
-
-async function _loadBrowserMod() {
-  if (_browserMod) return _browserMod;
-  _browserMod = await import("../indexer-web/index.js");
-  return _browserMod;
-}
-
-async function _ensureBrowserBooted() {
-  const mod = await _loadBrowserMod();
-  if (_browserBootKicked) return mod;
-  _browserBootKicked = true;
-  // boot() is idempotent + fire-and-forget — runs the cold scan in
-  // the background, the React layer polls indexerStatus() for progress.
-  mod.boot().catch((e) => {
-    // eslint-disable-next-line no-console
-    console.error("[browser indexer] boot failed:", e);
-  });
-  return mod;
-}
-
-// ---- Sidecar lifecycle stubs (legacy no-ops in web build) ---------------
-//
-// Pre-web (Tauri) builds had a separate sidecar process the React
-// layer could start/stop. None of that applies to the web build — kept
-// as no-ops so existing Settings UI hooks still resolve.
+// ---- Legacy sidecar-lifecycle stubs --------------------------------------
+// These existed for the desktop Tauri sidecar that owned the indexer
+// process. The web build has no spawnable process — kept as no-ops
+// so legacy SETTINGS code still compiles.
 
 export async function startSidecarIndexer(_network) {
-  if (getIndexerMode() === "browser") {
-    await _ensureBrowserBooted();
-  }
   return { running: true, url: getGlobalIndexerUrl() };
 }
 export async function stopSidecarIndexer() {
@@ -168,98 +123,77 @@ export async function getSidecarStatus() {
   return { running: true, url: getGlobalIndexerUrl() };
 }
 
-// ---- Public read API — dispatches by mode --------------------------------
-//
-// The signature for each `fetchGlobal*` keeps the legacy
-// `(arg, baseUrl, signal)` shape so the React callsites compile
-// unchanged from the Tauri-era code. `baseUrl` is ignored in BOTH
-// modes (HTTP mode reads from `getGlobalIndexerUrl()`, browser mode
-// reads its in-memory state).
+// ---- Read API — one wrapper per indexer route ----------------------------
 
 /**
- * `GET /` — health envelope. Shape MUST match server.rs's HealthResponse
- * so the React poller in `_pollSyncOnce` can consume it unchanged:
+ * GET /. Health + tip envelope:
  *   { network, core_url, indexed_height, tip_height, address_count,
  *     utxo_count, bet_count, transfer_count, deploy_count, token_count,
  *     last_progress_at, stalled, recent_errors }
  */
 export async function pingGlobalIndexer(_baseUrl, signal) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.indexerStatus();
-  }
   return _httpGet("/", signal);
 }
 
-/**
- * Per-address balance summary. Returns `{ TICKER: amount, ... }` — the
- * inner balances object (unwrapped from the indexer's `{ balances: {} }`
- * envelope, matching the legacy desktop adapter's behavior).
- */
+/** GET /balances/:addr — returns the `{ TICKER: amount, ... }` map only. */
 export async function fetchGlobalBalances(address, _baseUrl, signal) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.fetchBalances(address).balances;
-  }
   const env = await _httpGet(`/balances/${encodeURIComponent(address)}`, signal);
   return (env && env.balances) || {};
 }
 
 /**
- * Per-UTXO balance breakdown for one address. Returns the `utxos`
- * array directly. Used by tx-web's greedy minimum-UTXO coin selector.
- * Empty array (not null) means "no token UTXOs" — the caller should
- * treat that as authoritative, NOT as an error.
+ * GET /utxos/:addr — token-UTXO breakdown for one address. Used by
+ * tx-web's greedy minimum-UTXO coin selector for protocol token sends.
  */
 export async function fetchGlobalUtxoBalances(address, _baseUrl, signal) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.fetchUtxoBalances(address).utxos;
-  }
   const env = await _httpGet(`/utxos/${encodeURIComponent(address)}`, signal);
   return (env && env.utxos) || [];
 }
 
-/** Bets log filtered to sender == address. */
+/**
+ * GET /btc-utxos/:addr — raw Bitcoin UTXOs for one address. Used by
+ * the wallet for balance display + fee funding (selecting BTC inputs
+ * to pay protocol fees + miner fees). NOT served by the desktop's
+ * Esplora — this is a LUCKYPROTOCOL-indexer-specific extension that
+ * proxies bitcoind's `scantxoutset` under the hood.
+ *
+ * Returns: [{ txid, vout, sats, confirmed, block_height }]
+ *   * `sats` is integer satoshis (not BTC).
+ *   * `confirmed` is true iff the UTXO is in a block (not mempool).
+ *   * `block_height` is the block the UTXO landed in (null when
+ *     unconfirmed).
+ *
+ * Empty array (not null) means "no BTC at this address" — caller
+ * should treat that as authoritative.
+ */
+export async function fetchGlobalBtcUtxos(address, _baseUrl, signal) {
+  const env = await _httpGet(`/btc-utxos/${encodeURIComponent(address)}`, signal);
+  return (env && env.utxos) || [];
+}
+
+/** GET /bets/:addr — bets log filtered to sender == address. */
 export async function fetchGlobalBets(address, _baseUrl, signal) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.fetchBets(address).bets;
-  }
   const env = await _httpGet(`/bets/${encodeURIComponent(address)}`, signal);
   return (env && env.bets) || [];
 }
 
-/** Transfers log filtered to sender == address. */
+/** GET /transfers/:addr — transfers log filtered to sender == address. */
 export async function fetchGlobalTransfers(address, _baseUrl, signal) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.fetchTransfers(address).transfers;
-  }
   const env = await _httpGet(`/transfers/${encodeURIComponent(address)}`, signal);
   return (env && env.transfers) || [];
 }
 
-/**
- * Token registry items array (every DEPLOY the indexer has seen). For
- * the paginated envelope `{ total, offset, limit, items }`, use
- * `fetchGlobalTokensPaged` directly.
- */
+/** Convenience: token registry items only (drops the paging envelope). */
 export async function fetchGlobalTokens(_baseUrl, signal, opts = {}) {
   const page = await fetchGlobalTokensPaged(_baseUrl, signal, opts);
   return page.items || [];
 }
 
 /**
- * Paginated token registry envelope `{ total, offset, limit, items }`.
- * Matches the indexer's response shape so the INDEX screen's pagination
- * UI works unchanged.
+ * GET /tokens?limit=N&offset=N — paginated registry envelope
+ *   { total, offset, limit, items: [...] }.
  */
 export async function fetchGlobalTokensPaged(_baseUrl, signal, opts = {}) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.fetchTokensPaged(opts);
-  }
   const params = new URLSearchParams();
   if (opts.limit != null)  params.set("limit",  String(opts.limit));
   if (opts.offset != null) params.set("offset", String(opts.offset));
@@ -268,15 +202,10 @@ export async function fetchGlobalTokensPaged(_baseUrl, signal, opts = {}) {
 }
 
 /**
- * Holder list for one ticker — all addresses with positive balance,
- * sorted by balance descending. Returns
+ * GET /tokens/:ticker/holders?... — paginated holders for one ticker:
  *   { ticker, total, limit, offset, holders: [{ address, balance }, ...] }
  */
 export async function fetchTokenHolders(ticker, _baseUrl, opts = {}) {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    return mod.fetchTokenHolders(ticker, opts);
-  }
   const params = new URLSearchParams();
   if (opts.limit != null)  params.set("limit",  String(opts.limit));
   if (opts.offset != null) params.set("offset", String(opts.offset));
@@ -285,46 +214,88 @@ export async function fetchTokenHolders(ticker, _baseUrl, opts = {}) {
 }
 
 /**
- * Wake the indexer's poll loop immediately. Used by the React sync
- * poller right after it observes a tip advance via its own
- * `/blocks/tip/height` probe — drops indexer-side lag from ~half a
- * poll cycle (~5s) to one HTTP round-trip.
- *
- * Browser mode: nudges the local poll loop directly.
- * HTTP mode: best-effort `POST /poll-now` to the remote indexer.
- * Both paths swallow errors — a missed nudge just means waiting one
- * more poll cycle for the new block to land.
+ * GET /tx-status/:txid — confirmation state for one tx. Used after
+ * broadcasting a protocol tx to poll until it lands in a block.
+ * Returns:
+ *   { txid, confirmed: bool, block_height: number|null,
+ *     block_hash: string|null, block_time: number|null }
+ * A 404 from the indexer means "tx not yet seen" — callers should
+ * treat that as `confirmed: false` rather than a hard error. We catch
+ * it here and synthesize the unconfirmed view.
  */
-export function nudgeIndexerPoll() {
-  if (getIndexerMode() === "browser") {
-    _loadBrowserMod()
-      .then((mod) => { if (mod.nudgePoll) mod.nudgePoll(); })
-      .catch(() => { /* not booted yet — fine */ });
-    return;
+export async function fetchGlobalTxStatus(txid, signal) {
+  try {
+    return await _httpGet(`/tx-status/${encodeURIComponent(txid)}`, signal);
+  } catch (e) {
+    if (/HTTP 404/.test(String(e?.message))) {
+      return {
+        txid,
+        confirmed: false,
+        block_height: null,
+        block_hash: null,
+        block_time: null,
+      };
+    }
+    throw e;
   }
-  // HTTP mode — fire and forget.
-  _httpPost("/poll-now", null).catch(() => {
-    // Server might not support /poll-now (older indexer) or might be
-    // down. Either way, the next scheduled poll picks up the work.
-  });
 }
 
 /**
- * SETTINGS → RESCAN INDEXER.
- * Browser mode: wipes the IndexedDB snapshot and restarts cold scan.
- * HTTP mode: no-op — the server controls its own snapshot lifecycle;
- * client can't trigger a remote rescan. Logged as a warning so devs
- * notice if this gets wired up to a button in HTTP mode.
+ * GET /block-height/:height — returns the block hash at `height`, or
+ * `null` if `height` is past the current tip (block not yet mined).
+ * Used by V2 BET settlement (waiting for the determining block).
+ */
+export async function fetchGlobalBlockHash(height, signal) {
+  try {
+    const env = await _httpGet(`/block-height/${height}`, signal);
+    return env?.hash || env?.block_hash || null;
+  } catch (e) {
+    if (/HTTP 404/.test(String(e?.message))) return null;
+    throw e;
+  }
+}
+
+/**
+ * GET /block-info/:height — returns `{ hash, time }` for the block at
+ * `height`. `time` is seconds-since-epoch (block header timestamp).
+ * Returns `null` if `height` is past the current tip.
+ */
+export async function fetchGlobalBlockInfo(height, signal) {
+  try {
+    const env = await _httpGet(`/block-info/${height}`, signal);
+    if (!env) return null;
+    return {
+      hash: env.hash || env.block_hash,
+      time: env.time ?? env.timestamp ?? null,
+    };
+  } catch (e) {
+    if (/HTTP 404/.test(String(e?.message))) return null;
+    throw e;
+  }
+}
+
+/**
+ * POST /poll-now — wake the indexer's poll loop immediately. Fire-and-
+ * forget. Errors are swallowed (server may not support the route,
+ * may be temporarily down — either way the next scheduled poll picks
+ * up the work).
+ */
+export function nudgeIndexerPoll() {
+  _httpPost("/poll-now", null).catch(() => { /* fire and forget */ });
+}
+
+/**
+ * SETTINGS → RESCAN INDEXER. In the official-only architecture the
+ * client doesn't control server-side scan state, so this is a no-op
+ * + dev-warn. Left in place because the SETTINGS button still calls
+ * it; we may wire it to a future `DELETE /snapshot` admin endpoint
+ * but right now there's no remote control.
  */
 export async function wipeAndRescanIndexer() {
-  if (getIndexerMode() === "browser") {
-    const mod = await _ensureBrowserBooted();
-    await mod.wipeAndRescan();
-    return;
-  }
   // eslint-disable-next-line no-console
   console.warn(
-    "[indexer] wipeAndRescan is a no-op in HTTP mode — server controls scan state. " +
-    "Switch SETTINGS → Self-verify (advanced) to enable client-side scan reset."
+    "[indexer] wipeAndRescan: no-op — the official indexer at " +
+    `${getGlobalIndexerUrl()} controls its own snapshot lifecycle. ` +
+    "If state looks wrong, report it to the team."
   );
 }
