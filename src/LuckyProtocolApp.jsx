@@ -57,6 +57,7 @@ import {
   generateMnemonic as walletGenerateMnemonic,
   commitWallet as walletCommit,
   exportMnemonic as walletExport,
+  exportSecret as walletExportSecret,
   verifyPassword as walletVerifyPassword,
   // Web build only: combined verify-and-cache-decrypted-seed. Used by
   // UnlockModal so subsequent signing ops can use the cached private
@@ -17980,7 +17981,13 @@ function SettingsScreen({
   }, []);
 
   const [expPwd, setExpPwd] = useState("");
+  // `expPhrase` is the actual secret string shown on screen — either a
+  // 12-word BIP39 mnemonic or a 64-char private-key hex, depending on
+  // how the wallet was created/imported. `expKind` is the discriminator
+  // ("mnemonic" | "privkey") set the same time we set the phrase, used
+  // to label the button + warning text appropriately.
   const [expPhrase, setExpPhrase] = useState(null);
+  const [expKind, setExpKind] = useState(null);
   const [expErr, setExpErr] = useState("");
   const [expCopied, setExpCopied] = useState(false);
   const [expBusy, setExpBusy] = useState(false);
@@ -18117,14 +18124,23 @@ function SettingsScreen({
     if (!expPwd) { setExpErr("password required"); return; }
     setExpBusy(true);
     try {
-      const phrase = await exportMnemonicMock(expPwd);
-      setExpPhrase(phrase);
+      // walletExportSecret returns { kind: "mnemonic"|"privkey", value }
+      // — branch the UI label/warning on `kind` so a privkey-imported
+      // wallet doesn't get told it has a 12-word phrase it doesn't.
+      const out = await walletExportSecret(expPwd);
+      setExpPhrase(out.value);
+      setExpKind(out.kind);
       setExpPwd("");
     } catch (e) {
       setExpErr(e?.message ?? String(e));
     } finally { setExpBusy(false); }
   };
-  const hideMnemonic = () => { setExpPhrase(null); setExpCopied(false); setExpErr(""); };
+  const hideMnemonic = () => {
+    setExpPhrase(null);
+    setExpKind(null);
+    setExpCopied(false);
+    setExpErr("");
+  };
   const copyMnemonic = async () => {
     if (!expPhrase) return;
     try { await navigator.clipboard.writeText(expPhrase); setExpCopied(true); }
@@ -18633,13 +18649,19 @@ function SettingsScreen({
         )}
       </div>
 
-      {/* EXPORT MNEMONIC */}
+      {/* EXPORT SECRET — mnemonic or private key, whichever the user
+          originally imported with. We can't know the kind without
+          decrypting the blob, so the heading + intro use neutral copy
+          ("secret"); the post-reveal panel below switches to the
+          specific kind via `expKind`. */}
       <div className="btx-panel" style={{ marginTop: 8 }}>
-        <div className="btx-section-head">// WALLET :: EXPORT MNEMONIC</div>
+        <div className="btx-section-head">// WALLET :: EXPORT SECRET</div>
         <p style={{ fontSize: 11, color: "var(--hxm-text-dim)", lineHeight: 1.7, marginTop: 6 }}>
-          Reveal the 12-word recovery phrase for the wallet stored on this
-          device. Anyone with these words can spend every BTC and token you
-          hold — treat them like a private key.
+          Reveal the underlying secret for the wallet stored on this device.
+          If you created the wallet from a 12-word seed phrase, you'll see
+          the mnemonic; if you imported a raw private key, you'll see that
+          key in hex. Either form gives full spending authority — treat it
+          accordingly.
         </p>
 
         <div style={{
@@ -18651,15 +18673,15 @@ function SettingsScreen({
         }}>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             <li>
-              <b>WARNING:</b> write these words on paper. Do NOT screenshot,
+              <b>WARNING:</b> write this secret on paper. Do NOT screenshot,
               email, sync to cloud, or paste into any website. LUCKYPROTOCOL
-              support will never ask for them.
+              support will never ask for it.
             </li>
             <li style={{ marginTop: 6 }}>
-              <b>LUCKYPROTOCOL-ONLY WALLET</b> — Do NOT import this seed into
-              Sparrow, Electrum, Ledger, Trezor, Xverse, Unisat, or any other
-              Bitcoin wallet. Only the LUCKYPROTOCOL client recognizes the
-              meta-protocol; other wallets treat token-bearing UTXOs as
+              <b>LUCKYPROTOCOL-ONLY WALLET</b> — Do NOT import this secret
+              into Sparrow, Electrum, Ledger, Trezor, Xverse, Unisat, or any
+              other Bitcoin wallet. Only the LUCKYPROTOCOL client recognizes
+              the meta-protocol; other wallets treat token-bearing UTXOs as
               regular BTC and will spend them as change or fees, resulting in{" "}
               <b>PERMANENT AND IRREVERSIBLE TOKEN BURN</b>.
             </li>
@@ -18682,7 +18704,7 @@ function SettingsScreen({
             />
             <button className="btx-btn-primary" onClick={revealMnemonic} disabled={expBusy}>
               <KeyRound size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />
-              {expBusy ? "VERIFYING..." : "REVEAL MNEMONIC"}
+              {expBusy ? "VERIFYING..." : "REVEAL"}
             </button>
             {expErr && (
               <div className="hxm-mono" style={{ marginTop: 10, fontSize: 11, color: "var(--hxm-red)" }}>{expErr}</div>
@@ -18690,15 +18712,33 @@ function SettingsScreen({
           </>
         ) : (
           <>
+            {/* Kind badge — tells the user up-front what they're looking
+                at. A user who imported via private key shouldn't think
+                the 64-char hex they're seeing is some weird mnemonic. */}
+            <div className="hxm-bebas" style={{
+              fontSize: 10, letterSpacing: "0.24em",
+              color: "var(--hxm-gold-bright)",
+              marginBottom: 6,
+            }}>
+              {expKind === "privkey" ? "PRIVATE KEY (HEX)" : "BIP39 MNEMONIC"}
+            </div>
             <div style={{
               border: "1px solid var(--hxm-green)",
               background: "linear-gradient(180deg, rgba(20,40,20,0.55), rgba(0,20,8,0.85))",
               padding: 14, marginBottom: 12,
               fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 14, color: "var(--hxm-green)",
-              wordSpacing: 4, letterSpacing: "0.05em",
+              fontSize: expKind === "privkey" ? 12 : 14,
+              color: "var(--hxm-green)",
+              // wordSpacing only matters for the 12-word mnemonic
+              // (visually groups the words); for raw hex it adds an
+              // ugly gap on every space, which there shouldn't be one
+              // anyway. letterSpacing is kept either way — it makes
+              // adjacent identical characters distinguishable.
+              wordSpacing: expKind === "privkey" ? 0 : 4,
+              letterSpacing: "0.05em",
               userSelect: "text", borderRadius: 2,
               lineHeight: 1.8,
+              wordBreak: expKind === "privkey" ? "break-all" : "normal",
             }}>
               {expPhrase}
             </div>

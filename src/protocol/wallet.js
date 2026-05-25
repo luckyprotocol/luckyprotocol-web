@@ -152,6 +152,16 @@ export const exportMnemonic = async (password) => {
   return await walletWeb.exportMnemonic(password);
 };
 
+/**
+ * Reveal the wallet's underlying secret material — returns either the
+ * 12-word BIP39 mnemonic OR the raw 32-byte private key in hex,
+ * depending on how the wallet was originally created/imported. Callers
+ * MUST branch on `kind` for the user-facing label and warning copy.
+ */
+export const exportSecret = async (password) => {
+  return await walletWeb.exportSecret(password);
+};
+
 export const verifyPassword = async (password) => {
   await walletWeb.verifyPassword(password);
 };

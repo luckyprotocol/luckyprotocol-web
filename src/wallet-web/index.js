@@ -301,8 +301,38 @@ export async function verifyPassword(password) {
  * the cached session, so a "show recovery phrase" UI surface can't be
  * triggered without typing the password (defense against a malicious
  * browser extension that already has a session reference).
+ *
+ * Kept for backwards-compat with any caller that hard-coded the
+ * "mnemonic-only" contract. New callers should use `exportSecret`,
+ * which transparently surfaces either the mnemonic OR the raw
+ * private-key hex depending on how the wallet was imported.
  */
 export async function exportMnemonic(password) {
+  const out = await exportSecret(password);
+  if (out.kind !== "mnemonic") {
+    throw new Error("this wallet was imported from a raw private key; no BIP39 mnemonic is available");
+  }
+  return out.value;
+}
+
+/**
+ * Reveal the wallet's underlying secret material — either the 12-word
+ * BIP39 mnemonic (for wallets generated or imported via seed phrase)
+ * or the raw 32-byte private key in lowercase hex (for wallets
+ * imported via private key). Same Argon2id re-verification semantics
+ * as `exportMnemonic` so the UI doesn't get to bypass the password
+ * gate just because a session is cached.
+ *
+ * Returns:
+ *   { kind: "mnemonic", value: "<12 BIP39 words>" }
+ *   { kind: "privkey",  value: "<64 hex chars>"  }
+ *
+ * Caller is responsible for the user-facing distinction (button
+ * label, instructions, warning copy). The kind discriminator is
+ * primary; downstream code should branch on `kind`, never sniff
+ * the value's shape.
+ */
+export async function exportSecret(password) {
   const blob = await getWallet();
   if (!blob) throw new Error("no wallet on this device");
   const key = await deriveKey(password, blob.salt, blob.argon2);
@@ -313,13 +343,10 @@ export async function exportMnemonic(password) {
     throw new Error("wrong password");
   }
   const plaintext = new TextDecoder().decode(plaintextBytes);
-  // Priv-key wallets have no mnemonic to export — fail loudly so
-  // the SettingsScreen "show recovery phrase" UI surfaces a useful
-  // message instead of leaking the sentinel-prefixed hex.
   if (plaintext.startsWith(PRIVKEY_SENTINEL)) {
-    throw new Error("this wallet was imported from a raw private key; no BIP39 mnemonic is available");
+    return { kind: "privkey", value: plaintext.slice(PRIVKEY_SENTINEL.length) };
   }
-  return plaintext;
+  return { kind: "mnemonic", value: plaintext };
 }
 
 /**
