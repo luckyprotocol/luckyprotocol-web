@@ -39,25 +39,40 @@ import { LCKPROTOCOL_V1_HEIGHT, settleBet, tierReward } from "./protocol.js";
 // ---- Consensus constants (must match Rust protocol.rs) ------------------
 
 export const REQUIRED_TOKEN_SUPPLY = 21_000_000n;
+// Cohort-v950950 consensus protocol-fee model — ALL three opcodes
+// (DEPLOY, MINE, SEND) require an output paying EXACTLY their
+// respective fee amount to PROJECT_FEE_ADDRESS. Rule changed from
+// the previous `>=` semantics at the v950382 -> v950950 cohort bump:
+//
+//   DEPLOY: == 5,460 sats  (anti-spam on append-only registry)
+//   MINE:   == 546 sats    (every BET pays a project fee)
+//   SEND:   == 546 sats    (every transfer pays a project fee)
+//
+// Why exact-equality instead of ≥:
+//   1. Each tx has at most one "this is the fee" output, distinct
+//      from any voluntary donation outputs (which would carry a
+//      different amount). Unambiguous identification.
+//   2. PROJECT_FEE_ADDRESS history sweeps are precise: every
+//      5,460-sat output is a DEPLOY, every 546-sat output is a
+//      MINE-or-SEND. No "is this a donation or a fee?" decision.
+//   3. Wallets can't quietly inflate fees and pocket the difference
+//      via a higher-fee output that still satisfies the check.
 export const DEPLOY_PROTOCOL_FEE_SATS = 5_460;
-// SEND_PROTOCOL_FEE_SATS — consensus-enforced in cohort v950382+. Every
-// SEND tx must include at least one output paying >= this many sats to
-// PROJECT_FEE_ADDRESS or applyTx marks it `applied=false` (no balance
-// transfer happens; residual still routes per change_out_idx). The fee
-// gate is what makes /address/PROJECT_FEE_ADDRESS/txs a sound
-// fast-bootstrap source: a wallet that emits SENDs without the fee is
-// either non-protocol-aware (its TX gets ignored anyway) or trying to
-// evade the bootstrap path (same outcome — ignored).
+export const MINE_PROTOCOL_FEE_SATS = 546;
 export const SEND_PROTOCOL_FEE_SATS = 546;
 export const PROJECT_FEE_ADDRESS =
   "bc1pyefhtnuz2gw04fsynlsseeh847cqy20dw7yt6fnavm9fgnewcr7q88gqf3";
 
-// Reusable predicate: does this tx have at least one vout paying
-// `>= minSats` to `PROJECT_FEE_ADDRESS`? Used by both the DEPLOY and
-// SEND fee gates.
-function _hasProjectFeeOutput(ctx, minSats) {
+// Cohort-v950950 consensus protocol-fee check.
+//
+// Returns true iff the tx has at least one vout that pays EXACTLY
+// `expectedSats` to PROJECT_FEE_ADDRESS. Strict equality — see
+// the constant docs above for rationale. Mirrors the Rust
+// indexer's `Indexer::has_exact_project_fee` byte-for-byte so
+// the two implementations agree on every fee decision.
+function _hasExactProjectFee(ctx, expectedSats) {
   for (let i = 0; i < ctx.voutValues.length; i++) {
-    if (ctx.voutValues[i] >= minSats && ctx.voutAddresses[i] === PROJECT_FEE_ADDRESS) {
+    if (ctx.voutValues[i] === expectedSats && ctx.voutAddresses[i] === PROJECT_FEE_ADDRESS) {
       return true;
     }
   }
@@ -157,17 +172,30 @@ export function applyTx(state, ctx, payload) {
       changed = true;
       const winIdxValid = validateOutIdx(ctx, payload.winOutIdx);
       const tickerDeployed = state.tokens.has(payload.ticker);
+      // CONSENSUS FEE GATE (cohort v950950) — a MINE tx must have
+      // an output paying EXACTLY MINE_PROTOCOL_FEE_SATS (546) to
+      // PROJECT_FEE_ADDRESS. Without it the BET is rejected: no
+      // reward credit even on predicate hit, status = Invalid.
+      // Residual input pool still routes per change_out_idx so any
+      // token UTXO inadvertently spent as MINE funding is preserved
+      // via explicit change rather than burned for the fee miss.
+      //
+      // Wallets that omit the fee output are either non-protocol-
+      // aware or trying to dodge fast-bootstrap's PROJECT_FEE_ADDRESS
+      // sweep — either way the BET is invisible to /balances queries.
+      const feePaid = _hasExactProjectFee(ctx, MINE_PROTOCOL_FEE_SATS);
 
       let status = "settled";
       let win = null;
       let reward = 0n;
       let capExhausted = false;
 
-      if (!tickerDeployed || winIdxValid === null) {
+      if (!tickerDeployed || winIdxValid === null || !feePaid) {
         // BET against undeployed ticker, OR win_out_idx is OP_RETURN /
-        // out-of-range. Protocol-rejected; no UTXO mutation, no
-        // reward credit. Still recorded as Invalid so the UI can
-        // surface "you bet on an undeployed ticker" etc.
+        // out-of-range, OR protocol fee not paid. Protocol-rejected;
+        // no UTXO mutation, no reward credit. Still recorded as
+        // Invalid so the UI can surface why (undeployed ticker, bad
+        // win_out_idx, or missing fee).
         status = "invalid";
       } else {
         // Settle inline against the confirming block's hash —
@@ -233,16 +261,17 @@ export function applyTx(state, ctx, payload) {
       changed = true;
       const toValid = validateOutIdx(ctx, payload.toOutIdx);
       const poolAmt = inputPool.get(payload.ticker) || 0n;
-      // CONSENSUS FEE GATE (v950382+) — a SEND tx without a
-      // qualifying PROJECT_FEE_ADDRESS output is recorded but NOT
-      // applied: no balance transfer, recipient gets nothing,
+      // CONSENSUS FEE GATE (cohort v950950) — a SEND tx must have
+      // an output paying EXACTLY SEND_PROTOCOL_FEE_SATS (546) to
+      // PROJECT_FEE_ADDRESS. Without it the SEND is recorded but
+      // NOT applied: no balance transfer, recipient gets nothing,
       // residual still routes via change_out_idx (so the sender's
       // tokens aren't burned unfairly — they're recovered by
       // explicit change vs. the strict-burn fallback). Wallets that
       // omit the fee are either non-protocol-aware or trying to
       // dodge fast-bootstrap's PROJECT_FEE_ADDRESS index sweep;
       // either way the tx is invisible to /balances queries.
-      const feePaid = _hasProjectFeeOutput(ctx, SEND_PROTOCOL_FEE_SATS);
+      const feePaid = _hasExactProjectFee(ctx, SEND_PROTOCOL_FEE_SATS);
       const applied =
         toValid !== null && poolAmt >= payload.amount && feePaid;
 
@@ -287,11 +316,14 @@ export function applyTx(state, ctx, payload) {
     } else if (payload.kind === "deploy") {
       changed = true;
       const already = state.tokens.has(payload.ticker);
-      // CONSENSUS PROTOCOL FEE gate (PROTOCOL.md §5.1.2). A DEPLOY tx
-      // MUST include at least one output paying ≥ DEPLOY_PROTOCOL_FEE_SATS
-      // to PROJECT_FEE_ADDRESS. Without this gate the append-only
-      // tokens registry is griefable at dust cost.
-      const feePaid = _hasProjectFeeOutput(ctx, DEPLOY_PROTOCOL_FEE_SATS);
+      // CONSENSUS PROTOCOL FEE gate (cohort v950950). A DEPLOY tx
+      // MUST include at least one output paying EXACTLY
+      // DEPLOY_PROTOCOL_FEE_SATS (5,460) to PROJECT_FEE_ADDRESS.
+      // Without this gate the append-only tokens registry is
+      // griefable at dust cost. The strict-equality rule (== not ≥)
+      // matches the MINE/SEND fee enforcement so all three opcodes
+      // share the same protocol-fee semantics.
+      const feePaid = _hasExactProjectFee(ctx, DEPLOY_PROTOCOL_FEE_SATS);
       const applied = !already && feePaid;
       if (applied) {
         state.tokens.set(payload.ticker, {

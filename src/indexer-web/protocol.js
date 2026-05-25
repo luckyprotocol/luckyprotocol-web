@@ -22,13 +22,19 @@ export const PROTOCOL_PREFIX = "LUCKYPROTOCOL";
 
 // Activation height — earliest block where LUCKYPROTOCOL OP_RETURNs
 // are valid. ANY tx at height < this is invisible to the protocol
-// even if the OP_RETURN parses. Must stay in lockstep with the desktop
-// indexer's `LCKPROTOCOL_V1_HEIGHT`.
+// even if the OP_RETURN parses. Must stay in lockstep with the Rust
+// indexer's `LCKPROTOCOL_V1_HEIGHT` (luckyprotocol-indexer/src/protocol.rs).
 //
 // Cohort history (each bump invalidates ALL prior snapshots + LS state):
-//   949,375 — initial genesis (withdrawn during web-build cutover)
-//   950,382 — current web-cutover cohort. Pre-950,382 traffic is invisible.
-export const LCKPROTOCOL_V1_HEIGHT = 950_382;
+//   949,375 — initial Rust-indexer cohort (withdrawn)
+//   950,382 — web-cutover cohort (withdrawn during fee-model unification)
+//   950,950 — **CURRENT cohort**. Marks the three-fee consensus
+//             model activation: DEPLOY == 5,460, MINE == 546,
+//             SEND == 546 (all EXACT, to PROJECT_FEE_ADDRESS). Also
+//             unifies Rust+JS activation heights (they previously
+//             diverged Rust 949,375 vs JS 950,382, a latent
+//             state-drift bug).
+export const LCKPROTOCOL_V1_HEIGHT = 950_950;
 
 const MAX_OUT_IDX = 255;
 const MAX_SEND_AMT = 21_000_000n; // = REQUIRED_TOKEN_SUPPLY

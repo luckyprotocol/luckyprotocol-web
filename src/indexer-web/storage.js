@@ -53,7 +53,18 @@ const PRIMARY_KEY = "primary";
 //       SENDs in pre-v3 snapshots may have been recorded `applied=true`
 //       despite missing the fee; bump forces a clean rebuild so the
 //       new gate retroactively excludes them.
-export const SCHEMA_VERSION = 3;
+//   4 — cohort v950950 cutover. Three changes in one bump:
+//         (a) Activation height moves 950,382 -> 950,950 (Rust + JS
+//             previously diverged on activation; now unified).
+//         (b) MINE protocol fee enforced (== 546 sat to PROJECT_FEE_ADDRESS).
+//             Pre-v4 indexers credited reward on predicate hit without
+//             requiring a fee — v4 retroactively excludes those.
+//         (c) DEPLOY/MINE/SEND fee semantics changed from `>=` to `==`.
+//             Any tx that paid > the required fee (e.g. 1,000 instead
+//             of 546) is now rejected. Pre-v4 may have applied them.
+//       Combined effect: every pre-v950950 LUCKYPROTOCOL state is
+//       wiped, the indexer cold-rescans from 950,950 with the new rules.
+export const SCHEMA_VERSION = 4;
 
 let _dbPromise = null;
 function openDB() {

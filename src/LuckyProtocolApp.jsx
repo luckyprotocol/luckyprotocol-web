@@ -1722,25 +1722,32 @@ try { window.localStorage.removeItem("luckyprotocol.casino_onchain.v1"); } catch
 // Rust side. Each generation's marker is independent so users that
 // missed an intermediate cohort still get all wipes applied.
 try {
-  const COHORT_KEY = "luckyprotocol.cohort.v950382";
+  const COHORT_KEY = "luckyprotocol.cohort.v950950";
   if (!window.localStorage.getItem(COHORT_KEY)) {
  // Wipe NEW-prefix keys (cohort artifacts from any previous LUCKYPROTOCOL
- // build), the prior 949,375 cohort marker, AND legacy `luckyminer.*`
- // orphans from before the LuckyMiner → LuckyProtocol rebrand.
- // Without this purge, every user upgrading through the rename + the
- // 949,375 → 950,382 activation bump would have orphaned LS entries
- // accumulating indefinitely (never read, never written). The data
- // they contained is invalidated anyway — both the wire-prefix change
- // and the activation-height bump make any pre-950,382 protocol
- // activity invisible to this cohort.
+ // build), all prior cohort markers (949,375 / 950,382), AND legacy
+ // `luckyminer.*` orphans from before the LuckyMiner → LuckyProtocol
+ // rebrand.
+ //
+ // Cohort v950950 is a MAJOR consensus bump:
+ //   (a) Activation height 950,382 -> 950,950
+ //   (b) MINE protocol fee enforced (== 546 to PROJECT_FEE_ADDRESS)
+ //   (c) ALL three opcode fees changed from `>=` to `==` exact
+ // Any pre-v950950 LUCKYPROTOCOL state on disk is invalid for the
+ // new rules: tokens deployed below 950,950 are unrecognized, MINEs
+ // that didn't pay the 546-sat fee are now Invalid, fees > the
+ // required amount are now rejected. Cleanest path is full wipe +
+ // cold-rescan from the new activation height.
     for (const k of [
- // new-cohort (luckyprotocol.*) artifacts
+ // new-cohort (luckyprotocol.*) artifacts — all wiped, indexer
+ // rebuilds from 950,950 forward
       "luckyprotocol.indexed_balances.v1",
       "luckyprotocol.indexed_transfers.v1",
       "luckyprotocol.deployed_tokens.v1",
       "luckyprotocol.bets.v1",
- // prior cohort marker (so users coming from the 949,375 web build
- // get the wipe applied again on this bump)
+ // prior cohort markers (so users coming from any earlier web build
+ // get the wipe applied on this bump)
+      "luckyprotocol.cohort.v950382",
       "luckyprotocol.cohort.v949375",
  // legacy LuckyMiner-rebrand orphans (luckyminer.*)
       "luckyminer.indexed_balances.v1",

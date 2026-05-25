@@ -18,13 +18,14 @@ const LS_BALANCES_KEY = "luckyprotocol.indexed_balances.v1";
 // Protocol activation height (LUCKYPROTOCOL v1, UTXO-bound, genesis).
 // Any LUCKYPROTOCOL tx confirmed in a block STRICTLY BEFORE this height
 // is invalid. This app instance does NOT replay or recognize any
-// pre-950,382 deploys / balances / bets / transfers, including any
+// pre-950,950 deploys / balances / bets / transfers, including any
 // legacy `BTCASINO|*` payloads that may exist in earlier chain
-// history AND any prior LUCKYPROTOCOL cohort traffic (949,375-950,381
-// withdrawn during the web-build cutover).
+// history AND any prior LUCKYPROTOCOL cohort traffic (949,375 /
+// 950,382 withdrawn during fee-model unification at cohort v950950).
 // MUST stay in lockstep with src/indexer-web/protocol.js's
-// LCKPROTOCOL_V1_HEIGHT constant.
-export const LCKPROTOCOL_START_HEIGHT = 950_382;
+// LCKPROTOCOL_V1_HEIGHT constant AND the Rust indexer's
+// luckyprotocol-indexer/src/protocol.rs LCKPROTOCOL_V1_HEIGHT.
+export const LCKPROTOCOL_START_HEIGHT = 950_950;
 
 /** Returns true if a confirmed-tx block height counts toward the protocol. */
 export function isProtocolHeightValid(blockHeight) {
