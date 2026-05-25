@@ -8715,11 +8715,15 @@ function TopStatsBar({ state, chainState, network, onChainBets, scanReady }) {
  // not the integer-rounded recommended bucket.:
   const [nextBlockFee, setNextBlockFee] = useState(null);
  // Gate the mempool.space fee poll on initialSyncComplete. While the
- // PREPARING THE INDEXER overlay is up the app should be 100% Alchemy
- // (no mempool.space background traffic), so we skip the fee fetch
- // entirely until the indexer catches up to chain tip. Once sync
- // completes the dep flips true and useEffect re-mounts, kicking off
- // the first fee tick + the 60s poll.
+ // "PREPARING THE INDEXER" overlay is up, the dashboard is hidden
+ // anyway and chain RPCs to mempool.space would waste a free-tier
+ // request slot for a value the user can't see. Once the indexer
+ // reports synced, the dep flips true and useEffect re-mounts,
+ // kicking off the first fee tick + the 15s poll. mempool.space is
+ // the ONLY fee-rate source in the current architecture — fee data
+ // doesn't go through the official LUCKYPROTOCOL indexer (the node
+ // has it, but routing through the indexer just adds latency for
+ // a non-consensus number).
   const syncDone = sync.initialSyncComplete;
   useEffect(() => {
     if (!syncDone) return undefined;
