@@ -18714,40 +18714,15 @@ function SettingsScreen({
         )}
       </div>
 
-      {/* INDEXER MAINTENANCE — non-destructive: wipes the local IndexedDB
-          snapshot and forces a fresh cold scan from activation height.
-          Wallet keys / balances / settings are untouched. Useful when:
-            - the user suspects the indexer's view has drifted from chain
-              (e.g. token balance looks wrong after a SEND)
-            - a cohort bump just landed and the cached schemaVersion=N
-              path didn't trigger for some reason
-            - dev / QA work
-          NOT in DANGER ZONE because nothing irreversible happens — the
-          indexer can always rebuild canonical state by re-scanning. */}
-      <div className="btx-panel" style={{ marginTop: 14 }}>
-        <div className="btx-section-head">// INDEXER MAINTENANCE</div>
-        <p style={{ fontSize: 11, color: "var(--hxm-text-dim)", lineHeight: 1.7, marginTop: 6, marginBottom: 12 }}>
-          Discards the local indexer snapshot and rescans every block
-          since activation height. Takes a few minutes. Use this if
-          balances look wrong or if you've just upgraded across a
-          protocol cohort boundary. Wallet data is NOT touched.
-        </p>
-        <button
-          className="btx-btn-ghost"
-          onClick={async () => {
-            try {
-              setToast({ kind: "warn", msg: "Rescanning indexer from activation height…" });
-              await wipeAndRescanIndexer();
-              setToast({ kind: "ok", msg: "Indexer rescan started — see PREPARING THE INDEXER overlay" });
-            } catch (e) {
-              setToast({ kind: "err", msg: `Rescan failed: ${e?.message ?? String(e)}` });
-            }
-          }}
-        >
-          <RefreshCw size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />
-          RESCAN INDEXER
-        </button>
-      </div>
+      {/* INDEXER MAINTENANCE panel removed.
+          The RESCAN INDEXER button used to wipe the local IndexedDB
+          snapshot and force a cold rescan via the in-browser indexer.
+          With the in-browser indexer deleted, the official indexer at
+          luckyprotocolai.com owns its own snapshot lifecycle — the
+          client can't trigger a server-side rescan, so the button
+          would have been a no-op + warning. Removed outright. If a
+          remote-admin "purge snapshot" endpoint is added later, this
+          panel can come back with a real action. */}
 
       {/* INDEXER SOURCE panel removed.
           The browser-side indexer has been deleted; every chain
