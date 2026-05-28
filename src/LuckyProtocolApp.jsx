@@ -97,7 +97,6 @@ import {
 const chainGetAlchemyKey       = async () => null;
 const chainSetAlchemyKey       = async (_k) => undefined;
 const chainSetAlchemyKeySync   = (_k) => undefined;
-const chainGetAlchemyEsploraBase = () => null;
 const chainListAddressTxs      = async (_addr, _net) => [];
 import { changePassword as protocolChangePassword } from "./protocol/protocol.js";
 import { sendToAddress as txSendToAddress, splitUtxo as txSplitUtxo } from "./protocol/tx.js";
@@ -144,8 +143,6 @@ import {
   fetchGlobalUtxoBalances,
   fetchGlobalTokens,
   fetchTokenHolders,
-  startSidecarIndexer,
-  getSidecarStatus,
   wipeAndRescanIndexer,
   nudgeIndexerPoll,
   DEFAULT_GLOBAL_INDEXER_URL,
@@ -1220,7 +1217,6 @@ const hasAlchemyKey = () => !!__alchemyKeyCache;
 const SYNC_POLL_NORMAL_MS   = 15_000;
 const SYNC_POLL_GAME_MS     = 2_000;
 const SYNC_POLL_BEHIND_MS   = 1_500;
-const SYNC_FETCH_TIMEOUT_MS = 8_000;
 
 // Module-level flag: is the user currently inside a casino room (iron /
 // bronze / silver / gold)? Toggled by App via setInGameRoom() on screen
@@ -1246,64 +1242,6 @@ const setInGameRoom = (v) => {
  // before the next poll fires.
   _startSyncPoller();
 };
-// Public Esplora endpoints we can fall back through. Alchemy (when a key
-// is configured) is ALWAYS prepended at call time so it's tried first —
-// regional ISP / VPN drops on mempool.space are why we need a private
-// fallback at all. Order of attempts:
-// 1. Alchemy — `${alchemyBase}/blocks/tip/height` (only if key cached)
-// 2. blockstream.info (public, anycast, globally reachable)
-// 3. mempool.emzy.de (community mirror — confirmed reachable from
-//    networks that block / drop mempool.space, e.g. some CN ISPs)
-// 4. mempool.bitcoin-21.org (second community mirror, same property)
-// 5. mempool.space (public, listed last because CN networks routinely
-//    TLS-interfere with it — keeping it ensures correctness when the
-//    other mirrors are temporarily down, but stops it from being the
-//    first-hit failure that opens the circuit on every poll)
-// CSP allows all five hosts (tauri.conf.json security.csp connect-src).
-// Order MUST mirror luckyprotocol-indexer/src/source.rs::PUBLIC_FALLBACK_BASES
-// — same fallback chain on both sides means a network condition that
-// breaks the sidecar also breaks the frontend in a predictable way.
-const PUBLIC_ESPLORA_TIP_URLS = [
-  "https://blockstream.info/api/blocks/tip/height",
-  "https://mempool.emzy.de/api/blocks/tip/height",
-  "https://mempool.bitcoin-21.org/api/blocks/tip/height",
-  "https://mempool.space/api/blocks/tip/height",
-];
-
-// Per-host circuit breaker. After CIRCUIT_FAIL_THRESHOLD consecutive
-// failures from one host, that host is skipped for CIRCUIT_COOLDOWN_MS
-// before we try it again. Stops the console from being flooded with
-// "Failed to load resource" errors every poll tick when one host is
-// reliably unreachable from the user's network.
-const CIRCUIT_FAIL_THRESHOLD = 3;
-const CIRCUIT_COOLDOWN_MS = 60_000;
-const _esploraCircuit = new Map(); // url → { fails: number, openUntil: 0 }
-
-const _circuitAvailable = (url) => {
-  const c = _esploraCircuit.get(url);
-  if (!c) return true;
-  if (c.openUntil <= 0) return true;
-  if (Date.now() >= c.openUntil) {
- // Cooldown elapsed — close the circuit, give the host another shot.
-    c.openUntil = 0;
-    c.fails = 0;
-    return true;
-  }
-  return false;
-};
-const _circuitRecordSuccess = (url) => {
-  const c = _esploraCircuit.get(url);
-  if (c) { c.fails = 0; c.openUntil = 0; }
-};
-const _circuitRecordFailure = (url) => {
-  let c = _esploraCircuit.get(url);
-  if (!c) { c = { fails: 0, openUntil: 0 }; _esploraCircuit.set(url, c); }
-  c.fails += 1;
-  if (c.fails >= CIRCUIT_FAIL_THRESHOLD) {
-    c.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
-  }
-};
-
 let _syncState = {
   scanHeight: 0,
   chainTip:   0,
@@ -1368,57 +1306,6 @@ const _emitSync = () => {
     try { window.__luckyprotocol_syncStatus = _syncState; } catch (_) { /* ignore */ }
   }
   _syncListeners.forEach((fn) => fn(_syncState));
-};
-
-const _fetchWithTimeout = async (url, ms) => {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try { return await fetch(url, { signal: ctrl.signal, cache: "no-store" }); }
-  finally { clearTimeout(t); }
-};
-
-const _fetchEsploraTip = async () => {
- // Build the URL list at call time so we always pick up the latest
- // Alchemy key. Alchemy goes first when configured (private infra,
- // doesn't suffer from mempool.space's regional reliability issues),
- // then public fallbacks. The same per-host circuit breaker is used
- // for ALL urls — so if Alchemy itself is misconfigured / 4xxs we
- // skip it for 60s and try the public hosts.
-  const urls = [];
-  const alchemyBase = chainGetAlchemyEsploraBase();
-  if (alchemyBase) urls.push(`${alchemyBase}/blocks/tip/height`);
-  for (const u of PUBLIC_ESPLORA_TIP_URLS) urls.push(u);
-
-  let lastErr = null;
-  let allCircuitOpen = true;
-  for (const url of urls) {
-    if (!_circuitAvailable(url)) continue;
-    allCircuitOpen = false;
-    try {
-      const resp = await _fetchWithTimeout(url, SYNC_FETCH_TIMEOUT_MS);
-      if (!resp.ok) {
-        _circuitRecordFailure(url);
-        lastErr = new Error(`${url} http ${resp.status}`);
-        continue;
-      }
-      const text = await resp.text();
-      const n = parseInt(text.trim(), 10);
-      if (!Number.isFinite(n) || n <= 0) {
-        _circuitRecordFailure(url);
-        lastErr = new Error(`${url} bad tip "${text}"`);
-        continue;
-      }
-      _circuitRecordSuccess(url);
-      return n;
-    } catch (e) {
-      _circuitRecordFailure(url);
-      lastErr = e;
-    }
-  }
-  if (allCircuitOpen) {
-    throw new Error("all esplora hosts in cooldown — retrying after 60s");
-  }
-  throw lastErr || new Error("all esplora hosts failed");
 };
 
 // EWMA smoothing factor for the velocity estimate. Higher α = more
@@ -1596,105 +1483,63 @@ const _pollSyncOnce = async () => {
  // poller may still be ticking if a re-render fires before the timer
  // is cancelled, but every actual RPC starts here.
   if (!_syncEnabled) return;
- // 1) Global indexer (if user enabled it) is the authoritative source.
-  if (isGlobalIndexerEnabled()) {
-    try {
-      const url  = getGlobalIndexerUrl();
-      const data = await pingGlobalIndexer(url);
-      _globalIndexerEverResponded = true;
-      const indexed = Number(data.indexed_height) || 0;
-      const tip     = Number(data.tip_height)     || 0;
-      const lag     = Math.max(0, tip - indexed);
-      const synced  = tip > 0 && indexed >= tip;
-      const initialLag = synced
-        ? null
-        : (_syncState.initialLag == null || _syncState.initialLag < lag
-            ? lag
-            : _syncState.initialLag);
-      const now = Date.now();
-      const { velocityBps, lastSample } = _updateVelocity(_syncState, indexed, now);
-      _syncState = {
-        scanHeight: indexed,
-        chainTip:   tip,
-        scanning:   !synced,
-        synced,
+ // Global indexer is the sole authoritative source. There is no
+ // longer a public-Esplora fallback — every chain query (tip,
+ // balances, utxos, tx status) goes through luckyprotocolai.com.
+ // On failure we hold the last-known state so the UI doesn't
+ // flicker between "synced" and "connecting"; the SYSTEM HEALTH
+ // gate watches network reachability separately.
+  try {
+    const url  = getGlobalIndexerUrl();
+    const data = await pingGlobalIndexer(url);
+    _globalIndexerEverResponded = true;
+    const indexed = Number(data.indexed_height) || 0;
+    const tip     = Number(data.tip_height)     || 0;
+    const lag     = Math.max(0, tip - indexed);
+    const synced  = tip > 0 && indexed >= tip;
+    const initialLag = synced
+      ? null
+      : (_syncState.initialLag == null || _syncState.initialLag < lag
+          ? lag
+          : _syncState.initialLag);
+    const now = Date.now();
+    const { velocityBps, lastSample } = _updateVelocity(_syncState, indexed, now);
+    _syncState = {
+      scanHeight: indexed,
+      chainTip:   tip,
+      scanning:   !synced,
+      synced,
  // STICKY: once we've seen `synced=true` even ONCE, latch this
  // permanently for the session. The 30s incremental poll might
  // briefly observe `synced=false` (indexer 1-2 blocks behind tip
- // between blocks) — we MUST NOT re-lock the UI on those blips
- //. Operations stay unlocked once the initial
- // full scan from LCKPROTOCOL_START_HEIGHT to tip completes.
-        initialSyncComplete: _syncState.initialSyncComplete || synced,
-        tokenCount: Number(data.token_count) || _syncState.tokenCount,
-        initialLag,
-        lastUpdatedAt: now,
+ // between blocks) — we MUST NOT re-lock the UI on those blips.
+ // Operations stay unlocked once the initial full scan from
+ // LCKPROTOCOL_START_HEIGHT to tip completes.
+      initialSyncComplete: _syncState.initialSyncComplete || synced,
+      tokenCount: Number(data.token_count) || _syncState.tokenCount,
+      initialLag,
+      lastUpdatedAt: now,
  // Once synced, drop the velocity estimate — the chain advances
  // on a fixed ~10-min cadence, so any "blocks/sec" reading would
  // be misleading and would zero out the displayed ETA.
-        velocityBps: synced ? null : velocityBps,
-        lastSample,
- // Indexer diagnostics — added by server.rs Health response.
+      velocityBps: synced ? null : velocityBps,
+      lastSample,
+ // Indexer diagnostics — server.rs Health response fields.
  // - last_progress_at: unix seconds when indexed_height last
- //   advanced. Drives the "stalled vs syncing" distinction in
- //   the STATUS tile.
+ //   advanced. Drives the "stalled vs syncing" distinction.
  // - stalled: indexer's own judgment (lag > 0 && idle > 120s).
- //   We trust it directly rather than recomputing client-side
- //   so the threshold stays in lockstep with the Rust constant.
- // - recent_errors: ring buffer (0-16 entries) for the SETTINGS
- //   DIAGNOSTICS panel. Coerce to array defensively in case an
- //   older sidecar serves a response without this field.
-        lastProgressAt: Number(data.last_progress_at) || _syncState.lastProgressAt || 0,
-        stalled: Boolean(data.stalled),
-        recentErrors: Array.isArray(data.recent_errors) ? data.recent_errors : [],
-      };
-      _emitSync();
-      return;
-    } catch (e) {
- // Indexer down → fall through to Esplora-only mode for tip
- // display only. The signing-gate latch (initialSyncComplete)
- // is NOT advanced via this path when the indexer is enabled:
- // we wait for the real indexer to come up.
-      console.warn("[sync] global indexer ping failed, falling back to esplora tip-only", e?.message || e);
-    }
-  }
- // 2) Local-only / global-indexer-down fallback — chain tip from
- // Esplora, no backfill semantics. Latching initialSyncComplete
- // here is only safe when the global indexer is DISABLED (true
- // local-only mode) OR has previously responded. The boot-race
- // window (indexer enabled but never responded yet) only updates
- // the displayed tip — operation gating stays locked.
-  try {
-    const tip = await _fetchEsploraTip();
-    const synced = tip > 0;
-    const indexerActive = isGlobalIndexerEnabled();
-    const canLatchInitial = !indexerActive || _globalIndexerEverResponded;
-    // External-nudge wake: when the React poller sees the chain tip
-    // advance (via its own Esplora /blocks/tip/height probe), wake
-    // the browser indexer's poll loop immediately so it picks up the
-    // new block within an HTTP RTT instead of waiting up to
-    // POLL_INTERVAL_NORMAL_MS for its next scheduled tick. Cheap —
-    // a single Promise resolve, no HTTP, no I/O.
-    if (indexerActive && tip > (_syncState.chainTip || 0)) {
-      try { nudgeIndexerPoll(); } catch (_e) { /* indexer not yet booted */ }
-    }
-    _syncState = {
-      ..._syncState,
-      scanHeight: tip,
-      chainTip:   tip,
-      scanning:   false,
-      synced,
-      initialSyncComplete: _syncState.initialSyncComplete
-        || (synced && canLatchInitial),
-      initialLag: null,
-      lastUpdatedAt: Date.now(),
-      velocityBps: null,
-      lastSample: null,
+ // - recent_errors: ring buffer (0-16) for the DIAGNOSTICS panel.
+      lastProgressAt: Number(data.last_progress_at) || _syncState.lastProgressAt || 0,
+      stalled: Boolean(data.stalled),
+      recentErrors: Array.isArray(data.recent_errors) ? data.recent_errors : [],
     };
     _emitSync();
   } catch (e) {
- // Hold the last-known state — flickering between "synced" and
- // "connecting" on transient errors would be worse than showing stale.
-    console.warn("[sync] esplora tip fetch failed", e?.message || e);
+ // Indexer unreachable — keep last-known state so the UI doesn't
+ // flicker. SYSTEM HEALTH gate will lock the wallet if this
+ // persists. signing-gate latch (initialSyncComplete) deliberately
+ // NOT advanced here — we never unlock signing on a failed ping.
+    console.warn("[sync] global indexer ping failed", e?.message || e);
   }
 };
 
@@ -2458,24 +2303,15 @@ export default function LuckyProtocolApp() {
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         setSystemLock({ kind: "offline", detail: "browser reports offline" });
       } else {
- // Multi-source health probe. ANY of the hosts returning a valid
- // tip-height counts as "network up". This mirrors the sync poller's
- // fallback chain so a single-host regional outage (mempool.space
- // being TLS-blocked by the user's ISP, blockstream.info being slow,
- // Alchemy 429-throttled, etc.) doesn't lock the UI when other
- // hosts are reachable.
- // Order: Alchemy first (private RPC, fastest + no public-mirror
- // rate limit), then the same public-mirror order as the sync poller
- // — blockstream → emzy → bitcoin-21 → mempool.space. CN-friendly
- // mirrors come before mempool.space because the latter's TLS is
- // routinely interfered with on some CN ISPs.
-        const probeUrls = [];
-        const alchemyBase = chainGetAlchemyEsploraBase();
-        if (alchemyBase) probeUrls.push(`${alchemyBase}/blocks/tip/height`);
-        probeUrls.push("https://blockstream.info/api/blocks/tip/height");
-        probeUrls.push("https://mempool.emzy.de/api/blocks/tip/height");
-        probeUrls.push("https://mempool.bitcoin-21.org/api/blocks/tip/height");
-        probeUrls.push("https://mempool.space/api/blocks/tip/height");
+ // Two-source health probe — mempool.space first (we already use
+ // it for fees + broadcast, so its reachability is load-bearing),
+ // then the official LUCKYPROTOCOL indexer as a backup. Both hosts
+ // are in CSP `connect-src`. If either responds we treat the wallet
+ // as "network up"; only two consecutive total failures lock the UI.
+        const probeUrls = [
+          "https://mempool.space/api/blocks/tip/height",
+          `${getGlobalIndexerUrl()}/`,
+        ];
 
         let firstOkResp = null;
         let lastErr = null;
@@ -2494,7 +2330,7 @@ export default function LuckyProtocolApp() {
         if (firstOkResp) {
           consecFails = 0;
  // Clock skew via HTTP Date header — RFC 7231 says every server
- // SHOULD send Date. mempool.space / Alchemy / blockstream all do.
+ // SHOULD send Date. Both mempool.space and Caddy do.
           const serverDate = firstOkResp.headers.get("date");
           let lockedByClock = false;
           if (serverDate) {
@@ -2515,9 +2351,9 @@ export default function LuckyProtocolApp() {
           }
         } else {
           consecFails += 1;
- // Single transient failure across all hosts doesn't lock —
- // Esplora hiccups happen and we have 3-source fallback. Two
- // consecutive multi-host failures is genuine offline signal.
+ // Single transient failure doesn't lock — public mempool / our
+ // own CDN can hiccup. Two consecutive total failures is genuine
+ // offline signal.
           if (consecFails >= 2) {
             setSystemLock({
               kind: "offline",
@@ -3018,38 +2854,6 @@ export default function LuckyProtocolApp() {
     return () => { cancelled = true; };
   }, [walletMeta?.address, walletMeta?.network, runChainSync]);
 
- // Auto-spawn the global indexer sidecar at boot. The runtime treats
- // the indexer as always-on infra (`isGlobalIndexerEnabled` returns
- // true unconditionally), so the binary needs to be running before
- // any /balances / /tokens / /tokens/:ticker/holders request goes
- // out — otherwise every fetch surfaces as "Failed to fetch".
- // First we ping; if the sidecar is already running (e.g. user kept
- // the app alive across HMR reloads), we skip the spawn. Otherwise
- // we issue cmd_start_indexer which the Rust side handles
- // idempotently. Errors are logged but non-fatal — the app still
- // works in local-only mode.
-  useEffect(() => {
-    if (!walletMeta?.address) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await getSidecarStatus();
-        if (cancelled) return;
-        if (status?.running) {
-          console.log("[indexer] sidecar already running", status.url);
-          return;
-        }
-        const network = walletMeta.network || "bitcoin";
-        const started = await startSidecarIndexer(network);
-        if (cancelled) return;
-        console.log("[indexer] sidecar started", started?.url);
-      } catch (e) {
-        if (!cancelled) console.warn("[indexer] sidecar auto-start failed", e?.message || e);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [walletMeta?.address, walletMeta?.network]);
-
  // Stable ref so async callers (e.g. submitMine after broadcast lands)
  // can trigger a chain re-sync without forcing the caller's useCallback
  // to depend on runChainSync (which would churn it on every chainState
@@ -3348,10 +3152,11 @@ export default function LuckyProtocolApp() {
  // the new totals immediately.
   const refreshBalancesFromIndexer = useCallback(async () => {
  // Source order:
- // 1. If "use global indexer" is enabled in Settings AND we have an
- // address, fetch from the global indexer server.
- // 2. Otherwise, fall back to the local indexer (this app's own
- // derived balances from broadcast bets).
+ // Authoritative balances always come from the global indexer at
+ // luckyprotocolai.com. `getIndexedBalances()` is the last-known
+ // value held in module memory; it's only used as a placeholder
+ // until the first remote fetch lands, OR if a transient fetch
+ // failure means we can't update this tick.
     let balances = getIndexedBalances();
  // Did the global indexer successfully respond? If yes, its result
  // is AUTHORITATIVE and fully replaces s.wallet.balances — including
@@ -3366,7 +3171,7 @@ export default function LuckyProtocolApp() {
         balances = remote || {};
         globalAuthoritative = true;
       } catch (e) {
-        console.warn("[global-indexer] fetch failed, falling back to local", e);
+        console.warn("[global-indexer] balances fetch failed; keeping prior values this tick", e);
       }
     }
     setState((s) => {
@@ -17595,14 +17400,11 @@ function TransferSuccessModal({ info, onClose }) {
 // =============================================================================
 // `GlobalIndexerPanel` (the entire EXTERNAL/BUNDLED-SIDECAR mode toggle
 // + URL input + ENABLE/PING/sidecar-status row) was removed in this
-// pass. The user's directive —
-//— settled the only meaningful choice the panel offered: the
-// global indexer is now ALWAYS ON (see isGlobalIndexerEnabled). What
-// remained on the panel was infrastructure plumbing that's invisible to
-// the user when there's nothing to choose. The underlying helpers
-// (getGlobalIndexerUrl, pingGlobalIndexer, fetchGlobalBalances,
-// startSidecarIndexer, etc.) are still imported at module scope and
-// used by the App-level pollers to actually fetch balances / health.
+// pass. The global indexer is now ALWAYS ON pointing at the official
+// LUCKYPROTOCOL host (see isGlobalIndexerEnabled). The underlying
+// helpers (getGlobalIndexerUrl, pingGlobalIndexer, fetchGlobalBalances)
+// are still imported at module scope and used by the App-level pollers
+// to actually fetch balances / health.
 
 // =============================================================================
 // INDEXER DIAGNOSTICS PANEL — surfaces sidecar health to the user.
