@@ -18396,6 +18396,7 @@ function SettingsScreen({
           for fee rates + broadcast. Both URLs are pinned in source, not
           SETTINGS-tunable. State + add/remove/save handlers below stay
           dormant so the build doesn't reshape; pruning is a follow-up. */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
       {false && (
       <div className="btx-panel" style={{ marginTop: 8 }}>
         <div className="btx-section-head">// BTC ENDPOINTS</div>
