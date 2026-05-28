@@ -16,19 +16,14 @@
   # style-src 'self' 'unsafe-inline':      Recharts + lucide-react inline
   #                                        a small amount of style. Could
   #                                        be tightened later with nonces.
-  # connect-src — every host the indexer + wallet may fetch from. ANY new
-  #               endpoint added (e.g. a custom user Bitcoin Core URL via
-  #               Settings) lives outside this list and the browser blocks
-  #               it. That's WHY we don't include `*` here: it's the
-  #               trade-off for the safety net.
-  #
-  # NB: connect-src does NOT cover user-configured Bitcoin Core RPC URLs
-  # — those are typed in by the user at runtime, so we can't enumerate
-  # them at build time. Users hosting their own node will see CSP
-  # violations until they ALSO add their node's origin to a custom CSP
-  # header on their deployment. The Settings → BTC ENDPOINTS panel
-  # warns about this.
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://mempool.space https://blockstream.info https://*.alchemy.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
+  # connect-src — every host the wallet may fetch from. Two upstreams:
+  #   * luckyprotocolai.com — official LUCKYPROTOCOL indexer (balances,
+  #     bets/transfers history, BTC UTXOs, tx/block status). Served by
+  #     a Rust Axum service backed by a Bitcoin Core full node.
+  #   * mempool.space        — recommended fee rates + raw tx broadcast.
+  #     We deliberately don't run our own mempool to avoid the policy
+  #     drift / spam-bot mitigations a public mempool needs.
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://luckyprotocolai.com https://mempool.space; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
 
   # Force HTTPS for 2 years + preload list. Once deployed and the SSL is
   # confirmed working, you can submit the domain to

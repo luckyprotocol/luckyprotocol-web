@@ -42,13 +42,8 @@ luckyprotocol.example.com {
 	# vercel.json. The CSP is the most important one: it's the only
 	# thing standing between an XSS in a dependency and the user's
 	# IndexedDB-encrypted mnemonic.
-	#
-	# If a user wants to also use a self-hosted Bitcoin Core RPC via
-	# Settings → BTC ENDPOINTS, they'll need to append that origin to
-	# the connect-src list themselves; the build-time CSP can't know
-	# their node's hostname.
 	header {
-		Content-Security-Policy   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://mempool.space https://blockstream.info https://*.alchemy.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests"
+		Content-Security-Policy   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://luckyprotocolai.com https://mempool.space; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests"
 		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 		X-Content-Type-Options    "nosniff"
 		X-Frame-Options           "DENY"
